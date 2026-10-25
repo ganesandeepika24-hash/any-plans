@@ -1,24 +1,39 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Search } from "lucide-react";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "Any Plans? — Find something to do in London" },
+      { name: "description", content: "Any Plans? helps you find something to do in London." },
+      { property: "og:title", content: "Any Plans?" },
+      { property: "og:description", content: "Find something to do in London." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
+    <main className="flex min-h-screen items-center justify-center bg-background px-6">
+      <div className="w-full max-w-xl text-center">
+        <h1 className="font-display text-6xl tracking-tight text-foreground sm:text-7xl">
+          Any Plans<span className="text-primary">?</span>
+        </h1>
+        <p className="mt-4 text-lg text-muted-foreground">Find something to do in London</p>
+        <form className="mt-10" onSubmit={(e) => e.preventDefault()}>
+          <label className="flex items-center gap-3 rounded-full border border-border bg-card px-5 py-4 shadow-soft focus-within:ring-2 focus-within:ring-ring">
+            <Search className="h-5 w-5 text-muted-foreground" />
+            <input
+              type="search"
+              placeholder="Gigs, markets, galleries, pubs…"
+              className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </label>
+        </form>
+      </div>
+    </main>
   );
 }
