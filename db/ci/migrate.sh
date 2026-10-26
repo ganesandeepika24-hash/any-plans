@@ -3,6 +3,7 @@
 # together with recording its sha256 in schema_migrations.
 #
 # Already-applied files are skipped if unchanged; an edited one fails the run.
+# A file numbered below one already applied is still applied, with a notice.
 #
 # Usage: PSQL='psql postgres://...' db/ci/migrate.sh
 #        PSQL defaults to plain `psql`, so the usual PG* environment variables work.
@@ -32,6 +33,16 @@ for file in "$dir"/*.sql; do
     fi
     echo "$name: already applied"
     continue
+  fi
+
+  # Allowed, but say so: the live database then has a different apply order from a
+  # fresh one, which is only safe if the two migrations don't touch the same objects.
+  latest=""
+  if [ "$tracked" = t ]; then
+    latest=$(q -c "select max(version) from public.schema_migrations")
+  fi
+  if [ -n "$latest" ] && [[ "$version" < "$latest" ]]; then
+    echo "$name: NOTICE applying out of order, $latest is already applied"
   fi
 
   echo "$name: applying"

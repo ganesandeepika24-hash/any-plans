@@ -95,3 +95,6 @@ Centre points are from OpenStreetMap via Nominatim, looked up on 2026-10-26, © 
 ## Changes
 
 - **2026-10-26: borough default radius raised from 3 km to 6 km**, before 001 was merged or applied. A 3 km radius around a borough's centre point covers only part of the larger boroughs, such as Bromley, Hillingdon and Havering, so a search for "in Bromley" would miss much of it. Neighbourhoods stay at 1 km.
+- **2026-10-26: `job_runs` gains `deleted integer` in migration 005** (decision 0007), for the nightly delete job's count. The numbering is now 002 logging, 003 stage 3 metrics views (build plan 3.1), 004 watches and notifications, 005 `job_runs.deleted`.
+  - **Order of application.** On Supabase, 005 is applied before 002, 003 and 004. A fresh database applies them in name order. `migrate.sh` applies any unrecorded file in name order and prints a NOTICE when a file is numbered below one already applied.
+  - **Rules.** 002, 003 and 004 must not create or alter `job_runs.deleted`, and 005 must not depend on them. The 003 metrics views can't reference `job_runs.deleted`, because a fresh database creates them before 005. CI enforces this by building a fresh database in name order, so a 003 that references the column fails. If a view needs the column, a migration numbered 006 or later adds or replaces it.

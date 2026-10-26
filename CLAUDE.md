@@ -41,7 +41,7 @@ This file tells Claude Code how to work on "Any Plans?". Read it at the start of
 
 - Never commit secrets, and never paste them into chat, issues or docs.
 - Frontend environment variables: `SUPABASE_URL` and the publishable key only.
-- Everything else lives in Render and GitHub Actions secrets: `SUPABASE_SERVICE_KEY`, `GROQ_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `TAVILY_KEY`, `TICKETMASTER_KEY`, `SKIDDLE_KEY`, `LANGFUSE_*`, `RESEND_KEY`.
+- Everything else lives in Render and GitHub Actions secrets: `SUPABASE_SERVICE_KEY`, `SUPABASE_DB_URL` (session pooler connection string, used by the jobs and `migrate.sh`), `GROQ_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `TAVILY_KEY`, `TICKETMASTER_KEY`, `SKIDDLE_KEY`, `LANGFUSE_*`, `RESEND_KEY`.
 - If a secret is exposed, rotate it immediately, then update the decision log.
 
 ## Git
