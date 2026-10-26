@@ -86,27 +86,60 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Container name
+        run: echo "PG=${{ job.services.postgres.id }}" >> "$GITHUB_ENV"
 
       - name: Show image versions
-        env:
-          PG: ${{ job.services.postgres.id }}
         run: |
           docker exec "$PG" sh -c 'grep PRETTY_NAME /etc/os-release'
           docker exec "$PG" psql -U postgres -tAc "select version()"
           docker exec "$PG" psql -U postgres -tAc "select default_version from pg_available_extensions where name = 'postgis'"
 
       - name: Install pgvector
-        env:
-          PG: ${{ job.services.postgres.id }}
         run: |
           docker exec "$PG" sh -c 'apt-get update && apt-get install -y postgresql-17-pgvector'
           docker exec "$PG" dpkg -l postgresql-17-pgvector
 
-      - name: Check extensions load
-        env:
-          PG: ${{ job.services.postgres.id }}
+      # The image's init script puts postgis in the default database, so use a fresh one.
+      - name: Create database and Supabase roles
         run: |
-          # The image's init script puts postgis in the default database, so use a fresh one.
           docker exec "$PG" createdb -U postgres -T template1 anyplans
-          docker exec "$PG" psql -U postgres -d anyplans -v ON_ERROR_STOP=1 -tAc \
-            "create extension vector; create extension postgis; select extname || ' ' || extversion from pg_extension order by 1"
+          docker exec -i "$PG" psql -U postgres -d anyplans -X -v ON_ERROR_STOP=1 -f - < db/ci/bootstrap.sql
+          echo "PSQL=docker exec -i $PG psql -U postgres -d anyplans" >> "$GITHUB_ENV"
+
+      - name: Apply migrations
+        run: db/ci/migrate.sh
+
+      - name: Apply migrations again (skips unchanged)
+        run: db/ci/migrate.sh | tee /dev/stderr | grep -q "001_core.sql: already applied"
+
+      - name: Re-running 001 directly fails
+        run: |
+          if $PSQL -X -v ON_ERROR_STOP=1 -1 -f - < db/migrations/001_core.sql; then
+            echo "001 ran twice without error" >&2
+            exit 1
+          fi
+
+      - name: Load seeds twice
+        run: |
+          for pass in 1 2; do
+            for seed in cities areas; do
+              $PSQL -X -v ON_ERROR_STOP=1 -1 -f - < "db/seed/$seed.sql"
+            done
+          done
+
+      - name: RLS and index tests
+        run: $PSQL -X -v ON_ERROR_STOP=1 -f - < db/tests/rls_and_indexes.sql
+
+      - name: Applied migrations are unchanged
+        if: github.event_name == 'pull_request'
+        run: |
+          changed=$(git diff --name-only --diff-filter=MDR "origin/$GITHUB_BASE_REF...HEAD" -- db/migrations)
+          if [ -n "$changed" ]; then
+            echo "Applied migrations were edited, renamed or deleted:" >&2
+            echo "$changed" >&2
+            exit 1
+          fi

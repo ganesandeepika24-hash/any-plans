@@ -1,0 +1,217 @@
+-- Checks migration 001 and the seeds. Run as a superuser after db/ci/migrate.sh
+-- and both seeds, with ON_ERROR_STOP. Everything runs in one transaction and is
+-- rolled back. Each failed check raises an exception that names what broke.
+
+begin;
+
+-- Fixtures, written as service_role. This is also the "service_role can insert" check.
+set local role service_role;
+
+insert into public.venues (id, city_id, source, source_id, name, kind)
+values ('00000000-0000-0000-0000-000000000001', 'london', 'test', 'venue-1', 'Test venue', 'jazz_club');
+
+insert into public.events (city_id, source, source_id, title, category, start_at, end_at, status, venue_id) values
+  ('london', 'test', 'upcoming',       'Upcoming',             'Music',   now() + interval '1 day',  now() + interval '1 day 2 hours', 'active',    '00000000-0000-0000-0000-000000000001'),
+  ('london', 'test', 'no-end-started', 'No end, 1 hour in',    'Comedy',  now() - interval '1 hour', null,                            'active',    null),
+  ('london', 'test', 'multi-day',      'Exhibition',           'Arts',    now() - interval '10 days', now() + interval '10 days',     'active',    null),
+  ('london', 'test', 'no-end-over',    'No end, 4 hours in',   'Comedy',  now() - interval '4 hours', null,                           'active',    null),
+  ('london', 'test', 'ended',          'Ended',                'Theatre', now() - interval '3 hours', now() - interval '1 hour',      'active',    null),
+  ('london', 'test', 'cancelled',      'Cancelled',            'Music',   now() + interval '1 day',  null,                            'cancelled', null),
+  ('london', 'test', 'past',           'Marked past',          'Music',   now() + interval '1 day',  null,                            'past',      null);
+
+insert into public.curated_pages (venue_id, url, permitted) values ('00000000-0000-0000-0000-000000000001', 'https://example.com', true);
+insert into public.job_runs (job, city_id) values ('test', 'london');
+insert into public.usage_daily (date, service, calls, daily_limit) values (current_date, 'test', 1, 16);
+insert into public.config (key, version, value_json, updated_by, is_active) values
+  ('test.key', 1, '"one"', 'ci', true),
+  ('test.key', 2, '"two"', 'ci', false);
+
+reset role;
+
+-- What anon and authenticated can and can't do.
+do $$
+declare
+  r text;
+  t text;
+  visible text[];
+begin
+  foreach r in array array['anon', 'authenticated'] loop
+    execute format('set local role %I', r);
+
+    select array_agg(source_id order by source_id) into visible from public.events where source = 'test';
+    if visible is distinct from array['multi-day', 'no-end-started', 'upcoming'] then
+      raise exception '% sees events %, expected {multi-day,no-end-started,upcoming}', r, visible;
+    end if;
+
+    if (select count(*) from public.cities) <> 1
+       or (select count(*) from public.areas) = 0
+       or (select count(*) from public.venues where source = 'test') <> 1 then
+      raise exception '% cannot read cities, areas and venues', r;
+    end if;
+
+    foreach t in array array['config', 'usage_daily', 'curated_pages', 'job_runs', 'schema_migrations'] loop
+      begin
+        execute format('select count(*) from public.%I', t);
+        raise exception '% can read %', r, t;
+      exception when insufficient_privilege then
+        null;
+      end;
+    end loop;
+
+    begin
+      insert into public.events (city_id, source, source_id, title, category, start_at)
+      values ('london', 'test', 'by-' || r, 'Should fail', 'Music', now());
+      raise exception '% can insert into events', r;
+    exception when insufficient_privilege then
+      null;
+    end;
+
+    begin
+      update public.cities set name = 'Changed';
+      raise exception '% can update cities', r;
+    exception when insufficient_privilege then
+      null;
+    end;
+
+    reset role;
+
+    -- Checked directly: a call would also fail inside the function on config, hiding a missing revoke.
+    if has_function_privilege(r, 'public.set_active_config(text, integer)', 'execute') then
+      raise exception '% can execute set_active_config', r;
+    end if;
+  end loop;
+end $$;
+
+-- Config: one active row per key, and set_active_config switches it.
+do $$
+begin
+  set local role service_role;
+
+  begin
+    insert into public.config (key, version, value_json, is_active) values ('test.key', 3, '"three"', true);
+    raise exception 'config allowed two active rows for one key';
+  exception when unique_violation then
+    null;
+  end;
+
+  perform public.set_active_config('test.key', 2);
+  if (select array_agg(version) from public.config where key = 'test.key' and is_active) is distinct from array[2] then
+    raise exception 'set_active_config did not leave only version 2 active';
+  end if;
+
+  begin
+    perform public.set_active_config('test.key', 9);
+    raise exception 'set_active_config accepted a version that does not exist';
+  exception when raise_exception then
+    if sqlerrm not like 'config test.key has no version 9' then
+      raise;
+    end if;
+  end;
+
+  reset role;
+end $$;
+
+-- RLS is on for every table in public.
+do $$
+declare
+  missing text;
+begin
+  select string_agg(relname, ', ') into missing
+    from pg_class
+   where relnamespace = 'public'::regnamespace and relkind = 'r' and not relrowsecurity;
+  if missing is not null then
+    raise exception 'RLS is off on %', missing;
+  end if;
+end $$;
+
+-- Indexes and unique constraints.
+do $$
+declare
+  missing text;
+begin
+  select string_agg(e.idx || ' (' || e.method || ')', ', ') into missing
+    from (values
+      ('cities',  'cities_centre_geom_idx',      'gist'),
+      ('areas',   'areas_centre_geom_idx',       'gist'),
+      ('areas',   'areas_aliases_idx',           'gin'),
+      ('venues',  'venues_geom_idx',             'gist'),
+      ('venues',  'venues_embedding_idx',        'hnsw'),
+      ('events',  'events_geom_idx',             'gist'),
+      ('events',  'events_embedding_idx',        'hnsw'),
+      ('events',  'events_start_at_idx',         'btree'),
+      ('events',  'events_venue_id_idx',         'btree'),
+      ('config',  'config_one_active_per_key',   'btree')
+    ) as e (tbl, idx, method)
+   where not exists (
+     select 1
+       from pg_index i
+       join pg_class c on c.oid = i.indexrelid
+       join pg_am a on a.oid = c.relam
+      where c.relname = e.idx
+        and i.indrelid = ('public.' || e.tbl)::regclass
+        and a.amname = e.method
+   );
+  if missing is not null then
+    raise exception 'missing indexes: %', missing;
+  end if;
+
+  if (select count(*) from pg_index i join pg_class c on c.oid = i.indexrelid
+       where c.relname = 'config_one_active_per_key' and i.indisunique
+         and pg_get_expr(i.indpred, i.indrelid) = 'is_active') <> 1 then
+    raise exception 'config_one_active_per_key is not a unique index on (key) where is_active';
+  end if;
+
+  if (select count(*) from pg_constraint
+       where contype = 'u'
+         and (conrelid, conname) in (('public.venues'::regclass, 'venues_source_source_id_key'),
+                                     ('public.events'::regclass, 'events_source_source_id_key'))
+         and pg_get_constraintdef(oid) = 'UNIQUE (source, source_id)') <> 2 then
+    raise exception 'missing unique (source, source_id) on venues or events';
+  end if;
+
+  if (select indexdef from pg_indexes where indexname = 'venues_embedding_idx') not like '%vector_cosine_ops%'
+     or (select indexdef from pg_indexes where indexname = 'events_embedding_idx') not like '%vector_cosine_ops%' then
+    raise exception 'embedding indexes do not use vector_cosine_ops';
+  end if;
+end $$;
+
+-- Default privileges: neither owner hands anon or authenticated rights on new objects.
+do $$
+begin
+  if exists (
+    select 1
+      from pg_default_acl d, aclexplode(d.defaclacl) a
+     where d.defaclnamespace = 'public'::regnamespace
+       and a.grantee in ('anon'::regrole, 'authenticated'::regrole)
+  ) then
+    raise exception 'default privileges in public still grant to anon or authenticated';
+  end if;
+
+  create table public.ci_probe (x integer);
+  if has_table_privilege('anon', 'public.ci_probe', 'select')
+     or has_table_privilege('authenticated', 'public.ci_probe', 'insert') then
+    raise exception 'a new table in public is open to anon or authenticated';
+  end if;
+end $$;
+
+-- Seeds and migration tracking.
+do $$
+begin
+  if (select array_agg(id) from public.cities where active) is distinct from array['london'] then
+    raise exception 'London is not the only active city';
+  end if;
+
+  if (select count(*) from public.areas where kind = 'borough') <> 33
+     or (select count(*) from public.areas where kind = 'neighbourhood') <> 20
+     or exists (select 1 from public.areas where city_id <> 'london' or centre_geom is null) then
+    raise exception 'areas seed is wrong: expected 33 boroughs and 20 neighbourhoods in London, all with centres';
+  end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '001' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 001';
+  end if;
+end $$;
+
+rollback;
+
+\echo 'rls_and_indexes: all checks passed'
