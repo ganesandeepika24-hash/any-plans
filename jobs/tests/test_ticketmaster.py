@@ -152,7 +152,9 @@ def test_a_window_over_1000_items_is_split():
 def test_a_minimum_size_window_that_still_overflows_fails_the_window():
     w = Window(NOW, NOW + MIN_WINDOW)
     result, _ = fetch(FakeTicketmaster(lambda s, e: 1200), windows=[w])
-    assert result.failed_windows == [w]
+    [failure] = result.failed_windows
+    assert (failure.window, failure.status) == ("2026-11-01T00:00:00Z..2026-11-01T01:00:00Z", None)
+    assert failure.message == "1200 items in a minimum-size window"
     assert len(result.items) == 1000
     assert not result.complete
 
@@ -164,7 +166,13 @@ def test_a_failing_window_does_not_stop_the_others():
         return FakeTicketmaster(lambda s, e: 5)(request)
 
     result, _ = fetch(server, windows=initial_windows(NOW))
-    assert len(result.failed_windows) == 1
+    [failure] = result.failed_windows
+    assert (failure.window, failure.status, failure.page) == (
+        "2026-11-08T00:00:00Z..2026-11-15T00:00:00Z",
+        503,
+        0,
+    )
+    assert "Service Unavailable" in failure.message and "KEY" not in failure.message
     assert len(result.items) == 12 * 5
     assert not result.complete
 
@@ -180,3 +188,10 @@ def test_the_cap_stops_the_run_cleanly():
 
 def test_production_caps():
     assert (tm.PER_RUN_CAP, tm.DAILY_STOP) == (2000, 4500)
+
+
+def test_window_totals_and_results_are_recorded():
+    result, _ = fetch(FakeTicketmaster(lambda s, e: 45, applied_size=20))
+    assert result.windows == [
+        {"window": "2026-11-01T00:00:00Z..2026-11-08T00:00:00Z", "total": 45, "results": 45}
+    ]

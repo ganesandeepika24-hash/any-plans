@@ -54,3 +54,32 @@ def test_daily_stop_counts_calls_made_earlier_today():
     budget.take()
     with pytest.raises(CapReached, match="daily stop of 4500"):
         budget.take()
+
+
+def test_a_failure_carries_its_status_and_scrubbed_message():
+    def echo(request):
+        return httpx.Response(400, text=f"bad request for {request.url}")
+
+    client = client_for(echo)
+    with pytest.raises(RequestFailed) as error:
+        client.get_json("https://api.example/x", {"api_key": "SECRET-KEY", "q": "1"})
+    assert error.value.status == 400
+    assert "Bad Request" in error.value.message
+    assert "SECRET" not in error.value.message and "api_key=<redacted>" in error.value.message
+
+
+def test_a_network_error_has_no_status():
+    def down(request):
+        raise httpx.ConnectError("connection refused")
+
+    with pytest.raises(RequestFailed) as error:
+        client_for(down).get_json("https://api.example/x", {})
+    assert error.value.status is None and "ConnectError" in error.value.message
+
+
+def test_a_body_that_is_not_json_is_a_failure():
+    with pytest.raises(RequestFailed) as error:
+        client_for(lambda r: httpx.Response(200, text="<html>")).get_json(
+            "https://api.example/x", {}
+        )
+    assert error.value.status == 200 and "not JSON" in error.value.message

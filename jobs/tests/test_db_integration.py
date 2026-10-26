@@ -141,6 +141,13 @@ def test_no_sweep_after_a_failed_window(db, sql):
     vanished_event(sql)
     summary = run_tm(db, tm_server(fail_window="2026-11-08T00:00:00Z"))
     assert not summary.complete and not summary.swept
+    [failure] = summary.failed_windows
+    assert (failure["window"], failure["status"], failure["page"]) == (
+        "2026-11-08T00:00:00Z..2026-11-15T00:00:00Z",
+        503,
+        0,
+    )
+    assert "Service Unavailable" in failure["message"]
     assert sql("select count(*) from events where source_id = 'tm-vanished'") == [(1,)]
 
 
@@ -190,7 +197,7 @@ def test_a_dry_run_refuses_a_writable_connection(db):
 
 
 def test_skiddle_ingest(db, sql):
-    page = fixture("skiddle/events-page.json")
+    page = fixture("skiddle/events-page.json")  # trimmed real events
     summary = ingest.run(
         "skiddle",
         db,
@@ -201,10 +208,18 @@ def test_skiddle_ingest(db, sql):
         embedder=FakeEmbedder(),
         sleep=lambda s: None,
     )
-    assert (summary.counts.new, summary.calls, summary.swept) == (6, 1, False)
-    assert sql("select price_min, price_max from events where source_id = 'sk-range'") == [(10, 25)]
+    # The same page comes back for each of the 13 windows; duplicates are dropped.
+    assert (summary.calls, summary.complete, summary.failed_windows) == (13, True, [])
+    assert (summary.counts.new, summary.swept) == (26, False)
+    assert len(summary.windows) == 13 and summary.page_sizes == [100]
+    assert sql(
+        "select price_min, price_max, currency from events where source_id = '42504394'"
+    ) == [(30, 210, "GBP")]
+    assert sql("select count(*) from events where source = 'skiddle' and genre is not null") == [
+        (0,)
+    ]
     assert sql("select calls, daily_limit from usage_daily where service = 'skiddle'") == [
-        (1, 1000)
+        (13, 1000)
     ]
 
 

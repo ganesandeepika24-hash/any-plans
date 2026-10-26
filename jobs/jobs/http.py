@@ -3,13 +3,17 @@
 API keys travel in query strings, so errors are re-raised without the URL's query.
 """
 
+import re
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+ERROR_TEXT_LIMIT = 300
+_KEY_IN_TEXT = re.compile(r"(api_?key=)[^&\s\"']+", re.IGNORECASE)
 
 
 class CapReached(Exception):
@@ -21,7 +25,22 @@ class CapReached(Exception):
 
 
 class RequestFailed(Exception):
-    """A request failed after retries. The message never includes the query string."""
+    """A request failed after retries. Neither the status nor the message carries an API key."""
+
+    def __init__(self, status: int | None, message: str):
+        super().__init__(f"HTTP {status}: {message}" if status is not None else message)
+        self.status = status
+        self.message = message
+
+
+@dataclass(frozen=True)
+class Failure:
+    """One failed window, for the run summary."""
+
+    window: str
+    status: int | None
+    message: str
+    page: int | None = None  # Ticketmaster page number or Skiddle offset
 
 
 class CallBudget:
@@ -69,15 +88,22 @@ class RateLimitedClient:
                 response = self._client.get(url, params=params)
             except httpx.TransportError as exc:
                 if attempt == self._max_retries:
-                    raise RequestFailed(f"GET {_redact(url)}: {type(exc).__name__}") from None
+                    raise RequestFailed(
+                        None, f"GET {_redact(url)}: {type(exc).__name__}: {_scrub(str(exc))}"
+                    ) from None
                 self._sleep(self._backoff * 2**attempt)
                 continue
             if response.status_code in RETRY_STATUSES and attempt < self._max_retries:
                 self._sleep(_retry_after(response) or self._backoff * 2**attempt)
                 continue
             if response.is_error:
-                raise RequestFailed(f"GET {_redact(url)}: HTTP {response.status_code}")
-            return response.json()
+                raise RequestFailed(response.status_code, f"GET {_redact(url)}: {_text(response)}")
+            try:
+                return response.json()
+            except ValueError:
+                raise RequestFailed(
+                    response.status_code, f"GET {_redact(url)}: not JSON: {_text(response)}"
+                ) from None
         raise AssertionError("unreachable")
 
     def _wait(self) -> None:
@@ -96,3 +122,12 @@ def _retry_after(response: httpx.Response) -> float | None:
 
 def _redact(url: str) -> str:
     return url.split("?", 1)[0]
+
+
+def _scrub(text: str) -> str:
+    return _KEY_IN_TEXT.sub(r"\1<redacted>", text)
+
+
+def _text(response: httpx.Response) -> str:
+    body = " ".join(response.text.split())[:ERROR_TEXT_LIMIT]
+    return _scrub(f"{response.reason_phrase} {body}".strip())

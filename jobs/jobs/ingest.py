@@ -45,9 +45,13 @@ class Summary:
     skipped: dict[str, int] = field(default_factory=dict)
     complete: bool = False
     cap_reached: str | None = None
-    failed_windows: int = 0
+    # Each failure: window, HTTP status (null for a network error or an overflow), message,
+    # and the page (Ticketmaster) or offset (Skiddle) it failed on.
+    failed_windows: list[dict[str, Any]] = field(default_factory=list)
     split_windows: int = 0
     page_sizes: list[int] = field(default_factory=list)
+    # Each window's total and result count; Skiddle windows also list their pages.
+    windows: list[dict[str, Any]] = field(default_factory=list)
     swept: bool = False
     embedded: int = 0
 
@@ -75,24 +79,14 @@ def run(
     finished = False
     try:
         if source == "ticketmaster":
-            result = ticketmaster.fetch(
-                client, api_key, city.lat, city.lon, RADIUS_KM, initial_windows(now), on_page
-            )
-            summary.failed_windows = len(result.failed_windows)
-            summary.split_windows = result.split_windows
-            summary.page_sizes = sorted(result.page_sizes)
+            windows = initial_windows(now)
         else:
-            result = skiddle.fetch(
-                client,
-                api_key,
-                city.lat,
-                city.lon,
-                RADIUS_KM,
-                now.date(),
-                (now + HORIZON).date(),
-                on_page,
-            )
-            summary.failed_windows = int(result.failed)
+            windows = skiddle.date_windows(now.date(), (now + HORIZON).date())
+        result = module.fetch(client, api_key, city.lat, city.lon, RADIUS_KM, windows, on_page)
+        summary.failed_windows = [asdict(f) for f in result.failed_windows]
+        summary.split_windows = result.split_windows
+        summary.page_sizes = sorted(result.page_sizes)
+        summary.windows = result.windows
         summary.complete = result.complete
         summary.cap_reached = result.cap_reached
         summary.counts.fetched = len(result.items)

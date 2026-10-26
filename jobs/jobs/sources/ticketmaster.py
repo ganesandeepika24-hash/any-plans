@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from jobs.geo import geohash
-from jobs.http import CapReached, RateLimitedClient, RequestFailed
+from jobs.http import CapReached, Failure, RateLimitedClient, RequestFailed
 from jobs.normalise import Category, Event, Skipped, Venue, end_of_local_day, local_start
 from jobs.windows import Window
 
@@ -43,7 +43,8 @@ MAX_IMAGE_WIDTH = 1024
 @dataclass
 class FetchResult:
     items: list[dict[str, Any]] = field(default_factory=list)
-    failed_windows: list[Window] = field(default_factory=list)
+    failed_windows: list[Failure] = field(default_factory=list)
+    windows: list[dict[str, Any]] = field(default_factory=list)  # total and results per window
     split_windows: int = 0
     page_sizes: set[int] = field(default_factory=set)
     cap_reached: str | None = None
@@ -67,18 +68,24 @@ def fetch(
     try:
         while pending:
             window = pending.pop(0)
+            record = {"window": _label(window), "total": None, "results": 0}
             try:
                 _fetch_window(
-                    client, api_key, lat, lon, radius_km, window, pending, result, on_page
+                    client, api_key, lat, lon, radius_km, window, pending, result, on_page, record
                 )
-            except RequestFailed:
-                result.failed_windows.append(window)
+            except RequestFailed as error:
+                result.failed_windows.append(
+                    Failure(_label(window), error.status, error.message, record.get("page"))
+                )
+            result.windows.append(record)
     except CapReached as cap:
         result.cap_reached = cap.reason
     return result
 
 
-def _fetch_window(client, api_key, lat, lon, radius_km, window, pending, result, on_page) -> None:
+def _fetch_window(
+    client, api_key, lat, lon, radius_km, window, pending, result, on_page, record
+) -> None:
     params = {
         "apikey": api_key,
         "countryCode": "GB",
@@ -92,31 +99,47 @@ def _fetch_window(client, api_key, lat, lon, radius_km, window, pending, result,
         "sort": "date,asc",
         "page": 0,
     }
+    record["page"] = 0
     first = client.get_json(URL, params)
     if on_page:
         on_page(window, 0, first)
     total = int(first["page"]["totalElements"])
     size = int(first["page"]["size"])
     result.page_sizes.add(size)
+    record["total"] = total
 
     if total > DEEP_PAGING_LIMIT and window.can_split():
         pending[:0] = window.split()
         result.split_windows += 1
+        record["split"] = True
         return
     if total > DEEP_PAGING_LIMIT:
         # Can't split further, so this window can't be fetched in full.
-        result.failed_windows.append(window)
+        result.failed_windows.append(
+            Failure(_label(window), None, f"{total} items in a minimum-size window", None)
+        )
 
-    result.items.extend(_events(first))
+    _take(result, record, _events(first))
     total_pages = int(first["page"]["totalPages"])
     page = 1
     while page < total_pages and size * page < DEEP_PAGING_LIMIT:
+        record["page"] = page
         body = client.get_json(URL, {**params, "page": page})
         if on_page:
             on_page(window, page, body)
         result.page_sizes.add(int(body["page"]["size"]))
-        result.items.extend(_events(body))
+        _take(result, record, _events(body))
         page += 1
+    record.pop("page")
+
+
+def _take(result: FetchResult, record: dict[str, Any], events: list[dict[str, Any]]) -> None:
+    result.items.extend(events)
+    record["results"] += len(events)
+
+
+def _label(window: Window) -> str:
+    return f"{_api_time(window.start)}..{_api_time(window.end)}"
 
 
 def _events(body: dict[str, Any]) -> list[dict[str, Any]]:
