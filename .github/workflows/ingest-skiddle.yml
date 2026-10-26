@@ -1,0 +1,70 @@
+name: Ingest Skiddle
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Fetch and map only. The database connection is read-only.
+        type: boolean
+        default: false
+      save_sample:
+        description: Upload the raw pages as an artifact.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-writes
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: jobs
+    env:
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.fastembed
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: jobs/uv.lock
+
+      - name: Cache embedding model
+        uses: actions/cache@v6
+        with:
+          path: .fastembed
+          key: fastembed-all-MiniLM-L6-v2
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Ingest
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SKIDDLE_KEY: ${{ secrets.SKIDDLE_KEY }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SAVE_SAMPLE: ${{ inputs.save_sample }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          if [ "$SAVE_SAMPLE" = "true" ]; then args+=(--save-sample samples); fi
+          uv run python -m jobs.ingest skiddle "${args[@]}"
+
+      - name: Upload sample
+        if: always() && inputs.save_sample
+        uses: actions/upload-artifact@v7
+        with:
+          name: skiddle-sample
+          path: jobs/samples
+          retention-days: 7
+          if-no-files-found: ignore

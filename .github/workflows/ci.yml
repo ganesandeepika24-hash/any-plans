@@ -8,14 +8,16 @@ on:
       - "jobs/**"
       - "db/**"
       - "evals/**"
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/**"
+      - "docs/decisions/0001-sources-and-terms.md"
   pull_request:
     paths:
       - "agent/**"
       - "jobs/**"
       - "db/**"
       - "evals/**"
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/**"
+      - "docs/decisions/0001-sources-and-terms.md"
 
 permissions:
   contents: read
@@ -162,3 +164,61 @@ jobs:
             echo "$changed" >&2
             exit 1
           fi
+
+  jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgis/postgis:17-3.6
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/anyplans
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: jobs/uv.lock
+
+      - name: Container name
+        run: echo "PG=${{ job.services.postgres.id }}" >> "$GITHUB_ENV"
+
+      - name: Install pgvector
+        run: docker exec "$PG" sh -c 'apt-get update && apt-get install -y postgresql-17-pgvector'
+
+      # Same database as the db job: Supabase roles, migrations 001 and 005, seeds.
+      - name: Create test database
+        run: |
+          docker exec "$PG" createdb -U postgres -T template1 anyplans
+          docker exec -i "$PG" psql -U postgres -d anyplans -X -v ON_ERROR_STOP=1 -f - < db/ci/bootstrap.sql
+          PSQL="docker exec -i $PG psql -U postgres -d anyplans" db/ci/migrate.sh
+          for seed in cities areas; do
+            docker exec -i "$PG" psql -U postgres -d anyplans -X -v ON_ERROR_STOP=1 -1 -f - < "db/seed/$seed.sql"
+          done
+
+      - name: Install dependencies
+        working-directory: jobs
+        run: uv sync --frozen
+
+      - name: Lint
+        working-directory: jobs
+        run: uv run ruff check .
+
+      - name: Format check
+        working-directory: jobs
+        run: uv run ruff format --check .
+
+      - name: Tests (fixtures only, no network; database tests against the container)
+        working-directory: jobs
+        run: uv run pytest -v

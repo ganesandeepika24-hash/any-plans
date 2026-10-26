@@ -2,6 +2,18 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-26: step 1.1, event ingestion
+
+- **Page size quoted from memory.** An early plan assumed Ticketmaster's maximum page size is 200. The API reference documents only a default of 20 and no maximum. Caught when asked to check the reference before writing the paging code. The job now pages by the `page.size` each response reports, and a test fails if that's hard-coded.
+- **Migration number already reserved.** I proposed 003 for `job_runs.deleted` without seeing the build plan, where 003 is the stage 3 metrics views. It became 005, with ordering rules in 0008.
+- **Mistakes caught before commit, while writing the code:**
+  - an `__import__` hack in place of a normal import
+  - a leftover unused helper in `db.py`
+  - a delete job that printed its result twice
+  - a meaningless `return 0 if counts.deleted >= 0 else 1`
+  - Skiddle times without an offset thrown away instead of read as London local time
+- **An untested entry point.** The dry-run guarantee depends on `main()` turning `--dry-run` into a read-only connection, and nothing tested `main()`. Added a test, then checked that a deliberate break (a writable connection) fails it.
+
 ## 2026-10-26: step 0.5, core schema
 
 - **The approved CI image couldn't install pgvector.** `postgis/postgis:17-3.5` is on Debian bullseye, whose PGDG apt repo now returns 404. The plan assumed the install would work. A local test before writing any SQL caught it. Switched to `17-3.6` (trixie).

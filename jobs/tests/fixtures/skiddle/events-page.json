@@ -1,0 +1,181 @@
+{
+ "error": 0,
+ "totalcount": "8",
+ "pagelength": 100,
+ "results": [
+  {
+   "id": "sk-live",
+   "eventname": "Soul Night",
+   "EventCode": "LIVE",
+   "date": "2026-11-07",
+   "startdate": "2026-11-07T19:30:00+00:00",
+   "enddate": "2026-11-07T23:00:00+00:00",
+   "entryprice": "\u00a315.00",
+   "cancelled": "0",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-live/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-live_large.jpg",
+   "venue": {
+    "id": 9001,
+    "name": "Jazz Cafe",
+    "address": "5 Parkway",
+    "town": "London",
+    "postcode": "NW1 7PG",
+    "latitude": "51.539210",
+    "longitude": "-0.142950"
+   },
+   "genres": [
+    {
+     "genreid": "1",
+     "name": "Soul"
+    }
+   ]
+  },
+  {
+   "id": "sk-club",
+   "eventname": "Club Classics",
+   "EventCode": "CLUB",
+   "date": "2026-11-08",
+   "startdate": "2026-11-08T22:00:00+00:00",
+   "enddate": "2026-11-09T04:00:00+00:00",
+   "entryprice": "\u00a310.00",
+   "cancelled": "1",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-club/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-club_large.jpg",
+   "venue": {
+    "id": 9001,
+    "name": "Jazz Cafe",
+    "address": "5 Parkway",
+    "town": "London",
+    "postcode": "NW1 7PG",
+    "latitude": "51.539210",
+    "longitude": "-0.142950"
+   }
+  },
+  {
+   "id": "sk-free",
+   "eventname": "Open Mic Comedy",
+   "EventCode": "COMEDY",
+   "date": "2026-11-09",
+   "startdate": "2026-11-09T20:00:00+00:00",
+   "enddate": null,
+   "entryprice": "Free",
+   "cancelled": "0",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-free/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-free_large.jpg",
+   "venue": {
+    "id": 9001,
+    "name": "Jazz Cafe",
+    "address": "5 Parkway",
+    "town": "London",
+    "postcode": "NW1 7PG",
+    "latitude": "51.539210",
+    "longitude": "-0.142950"
+   }
+  },
+  {
+   "id": "sk-range",
+   "eventname": "Matinee Play",
+   "EventCode": "THEATRE",
+   "date": "2026-11-11",
+   "startdate": "2026-11-11T14:00:00+00:00",
+   "enddate": "2026-11-11T16:30:00+00:00",
+   "entryprice": "\u00a310.00 - \u00a325.00",
+   "cancelled": "0",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-range/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-range_large.jpg",
+   "venue": {
+    "id": 9001,
+    "name": "Jazz Cafe",
+    "address": "5 Parkway",
+    "town": "London",
+    "postcode": "NW1 7PG",
+    "latitude": "51.539210",
+    "longitude": "-0.142950"
+   }
+  },
+  {
+   "id": "sk-unmapped",
+   "eventname": "Speed Dating",
+   "EventCode": "DATE",
+   "date": "2026-11-12",
+   "startdate": "2026-11-12T19:00:00+00:00",
+   "enddate": null,
+   "entryprice": "\u00a320.00",
+   "cancelled": "0",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-unmapped/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-unmapped_large.jpg",
+   "venue": {
+    "id": 9001,
+    "name": "Jazz Cafe",
+    "address": "5 Parkway",
+    "town": "London",
+    "postcode": "NW1 7PG",
+    "latitude": "51.539210",
+    "longitude": "-0.142950"
+   }
+  },
+  {
+   "id": "sk-festival",
+   "eventname": "Winter Festival",
+   "EventCode": "FEST",
+   "date": "2026-11-13",
+   "startdate": "2026-11-13T12:00:00+00:00",
+   "enddate": "2026-11-15T23:00:00+00:00",
+   "entryprice": "\u00a345.00 - \u00a3120.00",
+   "cancelled": "0",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-festival/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-festival_large.jpg",
+   "venue": {
+    "id": 9001,
+    "name": "Jazz Cafe",
+    "address": "5 Parkway",
+    "town": "London",
+    "postcode": "NW1 7PG",
+    "latitude": "51.539210",
+    "longitude": "-0.142950"
+   }
+  },
+  {
+   "id": "sk-manchester",
+   "eventname": "Northern Night",
+   "EventCode": "LIVE",
+   "date": "2026-11-14",
+   "startdate": "2026-11-14T19:00:00+00:00",
+   "enddate": null,
+   "entryprice": "\u00a312.00",
+   "cancelled": "0",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-manchester/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-manchester_large.jpg",
+   "venue": {
+    "id": 9100,
+    "name": "Albert Hall",
+    "address": "27 Peter Street",
+    "town": "Manchester",
+    "postcode": "M2 5QR",
+    "latitude": "53.477420",
+    "longitude": "-2.248550"
+   }
+  },
+  {
+   "id": "sk-local-time",
+   "eventname": "Local Time Gig",
+   "EventCode": "LIVE",
+   "date": "2026-11-21",
+   "startdate": "2026-11-21T19:00:00",
+   "enddate": null,
+   "entryprice": "\u00a38.50",
+   "cancelled": "0",
+   "link": "https://www.skiddle.com/whats-on/London/event/sk-local-time/",
+   "largeimageurl": "https://d31fr2pwly4c4s.cloudfront.net/sk-local-time_large.jpg",
+   "venue": {
+    "id": 9001,
+    "name": "Jazz Cafe",
+    "address": "5 Parkway",
+    "town": "London",
+    "postcode": "NW1 7PG",
+    "latitude": "51.539210",
+    "longitude": "-0.142950"
+   }
+  }
+ ]
+}
