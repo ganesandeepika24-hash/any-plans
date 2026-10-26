@@ -21,7 +21,7 @@ Status: accepted (2026-10-25). Owner: deepika. Revisit: at the end of stage 4, o
 | Database | Supabase Postgres with PostGIS, pgvector and pg_cron; Row Level Security | Radius search, meaning search and scheduled jobs in one free service |
 | Auth | Supabase Auth (email magic link and Google) | Gates AI search and alerts; no separate auth service |
 | Ingest | GitHub Actions (cron) calling Python jobs | Free for public repos; run logs and manual triggers included |
-| Events | Ticketmaster Discovery API (bulk-use terms to be read before step 1.1), Skiddle (non-commercial, approved) | Permitted official sources (decision 0001) |
+| Events | Ticketmaster Discovery API (terms read 26 Oct 2026: not cleared for a scheduled bulk fetch (0001)), Skiddle (non-commercial, approved) | Permitted official sources (decision 0001) |
 | Venues | OpenStreetMap (Overpass) | Free, with attribution (decision 0003 drops Foursquare) |
 | Email | Resend | Daily digests; 3,000 a month on the free plan |
 | Observability and evals | Langfuse Cloud (Hobby, 50k units a month) | Traces, cost per query, eval scores |

@@ -44,7 +44,7 @@ Status key: **V** = verified against the provider's own page (fetched or quoted 
 | Ticketmaster Discovery API quota | 5,000 calls a day | **V** | developer.ticketmaster.com | None |
 | Ticketmaster per-second rate | 5 a second (Getting Started) vs 2 a second (FAQ) | **X** conflict | Ticketmaster pages | Design for 2 a second |
 | Ticketmaster paging | Deep paging limited to the first 1,000 items | **S** | Secondary (apis.io, PostHog docs) | Split London queries by date window |
-| Ticketmaster terms on bulk use | Terms reserve the right to block high-volume calls not tied to direct user actions. **Our nightly ingest may fall under this.** | **S** (summary by a third party; the primary terms weren't fetched) | vorplabs.com | **Priority:** read Ticketmaster's Terms of Use and the Discovery Feed option before stage 1 |
+| Ticketmaster terms on bulk use | Bulk fetching isn't expressly prohibited, but Ticketmaster may rate-limit calls "not primarily in response to direct user actions". **Our nightly ingest falls under this. Not cleared.** | **V** | Ticketmaster General Terms of Use (last updated 27 June 2023), read 26 Oct 2026 | Wait for written confirmation from Ticketmaster, or decide to proceed knowingly. Until then the ingest job runs on manual dispatch only (0001). |
 | Skiddle | Free key; API for non-commercial use only; commercial use needs written approval from dev@skiddle.com | **V** (Skiddle API page) | skiddle.com/api | Keep as non-commercial portfolio demo; ask before any commercial use |
 | OpenStreetMap / Overpass | Free; attribution (ODbL) | **X** not fetched this session | — | Read osm.org copyright page before stage 1 |
 | Foursquare | 500 free Pro calls a month from 1 June 2026; Premium has no free tier | **S** (change notice quoted) | Secondary; foursquare.com/pricing conflicts | Dropped (decision 0003) |
@@ -66,7 +66,7 @@ Status key: **V** = verified against the provider's own page (fetched or quoted 
 
 ## Priority order before step 0.2
 
-1. Ticketmaster bulk-use terms (could affect the nightly job).
+1. Ticketmaster bulk-use terms (could affect the nightly job). **Read 26 Oct 2026: not cleared.**
 2. Tavily credit cost (could exhaust the monthly allowance by mid-month).
 3. Groq limits and data terms (read the primary sources).
 4. Render card prompt (decides the host).
