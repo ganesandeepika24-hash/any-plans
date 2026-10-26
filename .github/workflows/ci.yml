@@ -115,14 +115,21 @@ jobs:
 
       - name: Apply migrations again (skips unchanged)
         run: |
-          db/ci/migrate.sh | tee /dev/stderr | grep -q "001_core.sql: already applied"
-
-      - name: Re-running 001 directly fails
-        run: |
-          if $PSQL -X -v ON_ERROR_STOP=1 -1 -f - < db/migrations/001_core.sql; then
-            echo "001 ran twice without error" >&2
+          out=$(db/ci/migrate.sh)
+          echo "$out"
+          if echo "$out" | grep -q ": applying"; then
+            echo "a second run applied a migration again" >&2
             exit 1
           fi
+
+      - name: Re-running each migration directly fails
+        run: |
+          for f in db/migrations/*.sql; do
+            if $PSQL -X -v ON_ERROR_STOP=1 -1 -f - < "$f"; then
+              echo "$f ran twice without error" >&2
+              exit 1
+            fi
+          done
 
       - name: Load seeds twice
         run: |
@@ -134,6 +141,17 @@ jobs:
 
       - name: RLS and index tests
         run: $PSQL -X -v ON_ERROR_STOP=1 -f - < db/tests/rls_and_indexes.sql
+
+      # Last database step: it records a probe migration 002 in the CI database.
+      - name: Out-of-order apply prints a notice
+        run: |
+          probe=$(mktemp -d)
+          cp -r db "$probe/"
+          printf '%s\n' "insert into public.schema_migrations (version, filename) values ('002', '002_ci_probe.sql');" \
+            > "$probe/db/migrations/002_ci_probe.sql"
+          out=$("$probe/db/ci/migrate.sh")
+          echo "$out"
+          echo "$out" | grep -q "002_ci_probe.sql: NOTICE applying out of order, 005 is already applied"
 
       - name: Applied migrations are unchanged
         if: github.event_name == 'pull_request'

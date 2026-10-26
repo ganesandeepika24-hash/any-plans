@@ -210,6 +210,25 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '001' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 001';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '005' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 005';
+  end if;
+end $$;
+
+-- Migration 005: job_runs.deleted.
+do $$
+begin
+  if (select data_type from information_schema.columns
+       where table_schema = 'public' and table_name = 'job_runs' and column_name = 'deleted')
+     is distinct from 'integer' then
+    raise exception 'job_runs.deleted is missing or not an integer';
+  end if;
+
+  if has_column_privilege('anon', 'public.job_runs', 'deleted', 'select')
+     or has_column_privilege('authenticated', 'public.job_runs', 'deleted', 'select') then
+    raise exception 'job_runs.deleted is readable by anon or authenticated';
+  end if;
 end $$;
 
 rollback;
