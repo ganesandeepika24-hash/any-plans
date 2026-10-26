@@ -25,7 +25,7 @@ Step 0.5 creates the tables every later stage reads from: cities, areas, venues,
 - Indexes: GIST on `cities.centre_geom`, `areas.centre_geom`, `venues.geom` and `events.geom`. HNSW with `vector_cosine_ops` on both `embedding` columns. BTREE on `events.start_at` and `events.venue_id`. GIN on `areas.aliases`. Unique `(source, source_id)` on venues and events.
 - RLS is on for all nine tables. `cities`, `areas` and `venues` are readable by `anon` and `authenticated`. `events` are readable when `status = 'active'` and the event hasn't ended. `curated_pages`, `job_runs`, `usage_daily`, `config` and `schema_migrations` have no policies and no grants. No table has a write policy; only `service_role` (which bypasses RLS) writes.
 - `usage_daily.date` is a UTC date, to match provider resets. The column keeps the name `date`.
-- Seeds: `db/seed/cities.sql` (London, the only active city) and `db/seed/areas.sql` (33 boroughs including the City of London, and 20 neighbourhoods). Both are idempotent with `on conflict (id) do update`. Area ids are `london-<slug>`. Boroughs get a 3 km default radius and neighbourhoods 1 km. London's settings: centre at Charing Cross, 10 km radius, `holiday_region 'england-and-wales'`, `travel_time_provider 'tfl'`.
+- Seeds: `db/seed/cities.sql` (London, the only active city) and `db/seed/areas.sql` (33 boroughs including the City of London, and 20 neighbourhoods). Both are idempotent with `on conflict (id) do update`. Area ids are `london-<slug>`. Boroughs get a 6 km default radius and neighbourhoods 1 km (see "Changes"). London's settings: centre at Charing Cross, 10 km radius, `holiday_region 'england-and-wales'`, `travel_time_provider 'tfl'`.
 - Neighbourhoods: Soho, Shoreditch, Camden Town, South Bank, Covent Garden, King's Cross, Brixton, Peckham, Dalston, Hackney Wick, Notting Hill, Clapham, Mayfair, Marylebone, Fitzrovia, Bermondsey, Borough, Angel, Greenwich town centre and Stratford. Ambiguous names (Camden, Greenwich) are deliberately not aliases; the agent resolves them.
 - CI: a `db` job in `ci.yml` runs on the same triggers as the agent job. It creates a fresh database, runs `db/ci/bootstrap.sql`, applies migrations, applies them again (expecting a skip), runs 001 directly (expecting failure), loads the seeds twice and runs `db/tests/rls_and_indexes.sql`.
 
@@ -73,3 +73,7 @@ Centre points are from OpenStreetMap via Nominatim, looked up on 2026-10-26, © 
   - activating a config version without deactivating the old one
 
   A missing explicit `service_role` grant isn't caught, because the default privileges cover it on Supabase and in CI.
+
+## Changes
+
+- **2026-10-26: borough default radius raised from 3 km to 6 km**, before 001 was merged or applied. A 3 km radius around a borough's centre point covers only part of the larger boroughs, such as Bromley, Hillingdon and Havering, so a search for "in Bromley" would miss much of it. Neighbourhoods stay at 1 km.
