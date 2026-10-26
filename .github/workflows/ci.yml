@@ -114,7 +114,8 @@ jobs:
         run: db/ci/migrate.sh
 
       - name: Apply migrations again (skips unchanged)
-        run: db/ci/migrate.sh | tee /dev/stderr | grep -q "001_core.sql: already applied"
+        run: |
+          db/ci/migrate.sh | tee /dev/stderr | grep -q "001_core.sql: already applied"
 
       - name: Re-running 001 directly fails
         run: |
