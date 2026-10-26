@@ -54,6 +54,7 @@ Centre points are from OpenStreetMap via Nominatim, looked up on 2026-10-26, © 
 - **The 3-hour fallback is a guess.** It's a literal in the policy, not config, because RLS shouldn't read the private config table.
 - **The `coalesce(...)` predicate can't use the `start_at` index.** That's fine at MVP size. Add an expression index if event reads slow down.
 - **`embedding` is readable by `anon`.** The frontend should select columns explicitly rather than `*`.
+- **`migrate.sh` is the only audited route for future migrations.** An apply through the SQL editor must record its checksum in the same run: paste the migration, then the `update public.schema_migrations set checksum = '<sha256>' where version = '<version>' and checksum is null` statement after it. A migration file can't contain its own sha256, so the checksum always comes from outside the file. If a run misses it, the record gets backfilled the same way before anything else is applied, or the next `migrate.sh` run stops on the missing checksum.
 
 ## Metrics and results
 
@@ -73,6 +74,23 @@ Centre points are from OpenStreetMap via Nominatim, looked up on 2026-10-26, © 
   - activating a config version without deactivating the old one
 
   A missing explicit `service_role` grant isn't caught, because the default privileges cover it on Supabase and in CI.
+
+## Live database record (26 Oct 2026)
+
+1. **Applied through the SQL editor.** Migration 001 was applied to Supabase on 26 Oct 2026 through the Supabase SQL editor, not through `db/ci/migrate.sh`. Reason: the session pooler connection string could not connect from the Codespace, so `migrate.sh` could not run against the live database.
+2. **Checksum backfilled.** The `schema_migrations` row for 001 has checksum `291e75698e238ed7f7bc765a7d60e969eff5d21d8183cc6d549797b392bf9ca1` (sha256 of `db/migrations/001_core.sql`). The SQL editor insert did not set it; it was backfilled with an `update` where `checksum is null`.
+3. **Post-apply checks, all passed:**
+   - `schema_migrations` has one row (`001`, `001_core.sql`, checksum set).
+   - postgis and vector are in the `extensions` schema.
+   - pg_cron is installed.
+   - No public table lacks RLS.
+   - Anon selecting from `events` returns 0 rows.
+   - Anon selecting from `config` fails with permission denied (42501).
+4. **Seeds loaded through the SQL editor**, in order: `cities.sql`, then `areas.sql`. Results:
+   - `public.cities` has one row, `london`, `active = true`.
+   - `areas` has 33 borough rows and 20 neighbourhood rows.
+   - All 33 boroughs have `default_radius_km = 6`.
+5. **Still to come.** The step 1.1 dry run has not happened. Migration 005 is not yet applied to Supabase; it will be applied after its PR is merged, following the same route.
 
 ## Changes
 
