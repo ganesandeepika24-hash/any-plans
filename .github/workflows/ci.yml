@@ -70,3 +70,37 @@ jobs:
           tags: any-plans-agent:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgis/postgis:17-3.6
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PG: ${{ job.services.postgres.id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show image versions
+        run: |
+          docker exec "$PG" sh -c 'grep PRETTY_NAME /etc/os-release'
+          docker exec "$PG" psql -U postgres -tAc "select version()"
+          docker exec "$PG" psql -U postgres -tAc "select default_version from pg_available_extensions where name = 'postgis'"
+
+      - name: Install pgvector
+        run: |
+          docker exec "$PG" sh -c 'apt-get update && apt-get install -y postgresql-17-pgvector'
+          docker exec "$PG" dpkg -l postgresql-17-pgvector
+
+      - name: Check extensions load
+        run: |
+          docker exec "$PG" psql -U postgres -v ON_ERROR_STOP=1 -tAc \
+            "create extension vector; create extension postgis; select extname || ' ' || extversion from pg_extension order by 1"
