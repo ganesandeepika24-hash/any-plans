@@ -239,13 +239,28 @@ class Database:
             )
             return cur.rowcount
 
-    def delete_ended_events(self, now: datetime, fallback: timedelta) -> int:
+    def delete_ended_events(self, now: datetime, fallback: timedelta) -> tuple[int, int]:
+        """Delete ended events. Returns (events, snapshots): the snapshots go by cascade.
+
+        Every part of the statement reads the same snapshot of the data, so the count
+        still sees the price_snapshots rows the cascade removes.
+        """
         with self.conn.cursor() as cur:
             cur.execute(
-                "delete from public.events where coalesce(end_at, start_at + %s) <= %s",
-                (fallback, now),
+                """
+                with gone as (
+                  delete from public.events
+                   where coalesce(end_at, start_at + %(fallback)s) <= %(now)s
+                  returning id
+                )
+                select (select count(*) from gone),
+                       (select count(*) from public.price_snapshots
+                         where event_id in (select id from gone))
+                """,
+                {"fallback": fallback, "now": now},
             )
-            return cur.rowcount
+            events, snapshots = cur.fetchone()
+            return events, snapshots
 
     def delete_orphan_venues(self, source: str) -> int:
         with self.conn.cursor() as cur:
@@ -258,6 +273,70 @@ class Database:
                 (source,),
             )
             return cur.rowcount
+
+    # Price snapshots (decision 0009) -----------------------------------------
+    # "Current" is the same rule as events_public_read and the delete job; "priced"
+    # means price_min or price_max is set.
+
+    def snapshot_cities(self, now: datetime, fallback: timedelta) -> list[tuple[str, ZoneInfo]]:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                select distinct c.id, c.timezone
+                  from public.events e join public.cities c on c.id = e.city_id
+                 where coalesce(e.end_at, e.start_at + %(fallback)s) > %(now)s
+                   and (e.price_min is not null or e.price_max is not null)
+                 order by c.id
+                """,
+                {"fallback": fallback, "now": now},
+            )
+            return [(city_id, ZoneInfo(tz)) for city_id, tz in cur.fetchall()]
+
+    def count_snapshot_targets(
+        self, city_id: str, day: date, now: datetime, fallback: timedelta
+    ) -> tuple[int, int]:
+        """For a dry run: (events to snapshot, of which already snapshotted today)."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                select count(*),
+                       count(*) filter (where exists (
+                         select 1 from public.price_snapshots s
+                          where s.event_id = e.id and s.snapshot_date = %(day)s))
+                  from public.events e
+                 where e.city_id = %(city)s
+                   and coalesce(e.end_at, e.start_at + %(fallback)s) > %(now)s
+                   and (e.price_min is not null or e.price_max is not null)
+                """,
+                {"city": city_id, "day": day, "fallback": fallback, "now": now},
+            )
+            total, existing = cur.fetchone()
+            return total, existing
+
+    def snapshot_prices(
+        self, city_id: str, day: date, now: datetime, fallback: timedelta
+    ) -> tuple[int, int]:
+        """Write today's snapshots for a city. Returns (inserted, updated)."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into public.price_snapshots
+                  (event_id, snapshot_date, price_min, price_max, currency, status, captured_at)
+                select e.id, %(day)s, e.price_min, e.price_max, e.currency, e.status, %(now)s
+                  from public.events e
+                 where e.city_id = %(city)s
+                   and coalesce(e.end_at, e.start_at + %(fallback)s) > %(now)s
+                   and (e.price_min is not null or e.price_max is not null)
+                on conflict (event_id, snapshot_date) do update set
+                  price_min = excluded.price_min, price_max = excluded.price_max,
+                  currency = excluded.currency, status = excluded.status,
+                  captured_at = excluded.captured_at
+                returning (xmax = 0)
+                """,
+                {"city": city_id, "day": day, "fallback": fallback, "now": now},
+            )
+            flags = [row[0] for row in cur.fetchall()]
+            return sum(flags), len(flags) - sum(flags)
 
     def set_embedding(self, event_id: UUID, vector: list[float]) -> None:
         with self.conn.cursor() as cur:

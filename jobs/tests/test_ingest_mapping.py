@@ -85,3 +85,25 @@ def test_the_dry_run_flag_opens_a_read_only_connection(monkeypatch):
         except StopAfterConnect:
             pass
     assert opened == [True, False]
+
+
+def test_the_snapshot_dry_run_flag_opens_a_read_only_connection(monkeypatch):
+    from jobs import snapshot_prices
+
+    opened = []
+
+    class StopAfterConnect(Exception):
+        pass
+
+    def connect(url, read_only):
+        opened.append(read_only)
+        raise StopAfterConnect
+
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://example")
+    monkeypatch.setattr(snapshot_prices.Database, "connect", staticmethod(connect))
+    for argv in (["--dry-run"], []):
+        try:
+            snapshot_prices.main(argv)
+        except StopAfterConnect:
+            pass
+    assert opened == [True, False]

@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-26: step 1.2a, price snapshots
+
+- **CI would have broken on the next migration.** The out-of-order probe in `ci.yml` checked for the literal text "005 is already applied", so adding 006 would have failed the db job. Caught while reading `ci.yml` during planning. It now works out the highest migration number from `db/migrations/`.
+- **Duration measured against a fixed clock.** The new job first computed `duration_ms` as wall-clock time minus the run's `now`. With a test clock months away, that overflowed the integer column. It now uses a monotonic clock. The ingest and delete jobs still use the old pattern, which is harmless in production, where `now` is the real time. Change them when they're next touched.
+- **A deliberate break that tested nothing.** A migration edit run as a jobs-test break "passed" for the wrong reason: the command ran outside the jobs project, and the database was already migrated anyway. Redone properly by applying mutated copies of 006 to a fresh database.
+- **A brief that didn't match 001.** The brief gave `price_snapshots.status` two allowed values; 001 allows three. It was matched to 001, and a db test now fails if the two lists ever differ.
+
 ## 2026-10-26: step 1.1, event ingestion
 
 - **The Skiddle fixture was written from memory.** It had a `pagelength` field and a `genres` list that Skiddle doesn't send, and it assumed GBP. The real dry run showed `pagecount`, no genres, a `currency` field and a structured `ticketpricing`. Caught by the dry run's sample. The fixture is now 40 trimmed real events.

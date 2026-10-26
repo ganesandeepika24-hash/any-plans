@@ -111,6 +111,12 @@ def test_skiddle_rejects_any_other_trigger_set(text):
     assert skiddle_failures(text, f"{SKIDDLE_APPROVAL} (conditions recorded 26 Oct 2026)\n") != []
 
 
+def test_snapshot_workflow_is_scheduled_and_manual():
+    workflow = WORKFLOWS / "snapshot-prices.yml"
+    assert triggers(workflow.read_text()) == {"schedule", "workflow_dispatch"}
+    assert "ticketmaster" not in workflow.read_text().lower()
+
+
 def test_no_other_workflow_mentions_ticketmaster(not_cleared):
     others = [
         p.name

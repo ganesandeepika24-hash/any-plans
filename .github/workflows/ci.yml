@@ -153,7 +153,8 @@ jobs:
             > "$probe/db/migrations/002_ci_probe.sql"
           out=$("$probe/db/ci/migrate.sh")
           echo "$out"
-          echo "$out" | grep -q "002_ci_probe.sql: NOTICE applying out of order, 005 is already applied"
+          latest=$(ls db/migrations/*.sql | sed -E 's|.*/([0-9]+)_.*|\1|' | sort | tail -n 1)
+          echo "$out" | grep -q "002_ci_probe.sql: NOTICE applying out of order, $latest is already applied"
 
       - name: Applied migrations are unchanged
         if: github.event_name == 'pull_request'

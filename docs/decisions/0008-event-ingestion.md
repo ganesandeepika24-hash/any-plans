@@ -97,15 +97,16 @@ Step 1.1 fills the `events` table from Ticketmaster and Skiddle. The constraints
 - At the end it gets `duration_ms`, `fetched`, `new`, `updated`, `failed` and `deleted` (postponed and swept events, or the delete job's events plus orphaned Ticketmaster venues). A crashed run keeps `duration_ms` null.
 - Skipped items aren't stored: skipped = fetched − new − updated − failed. Their reasons are printed in the run summary.
 
-## Migration order (002 to 005)
+## Migration order (002 to 007)
 
-Migration 005 (`job_runs.deleted`) is on Supabase before 002 (logging), 003 (stage 3 metrics views) and 004 (watches) exist. A fresh database applies them in name order.
+002 (logging), 003 (stage 3 metrics views) and 004 (watches) haven't been written yet. Migrations 005 (`job_runs.deleted`), 006 (`price_snapshots`) and 007 (planned: `events.duplicate_of`, the `pub` venue kind, `venues.website_url`) reach Supabase first. So on Supabase, 002 to 004 will be applied after them, out of name order. A fresh database, including CI's, applies every migration in name order.
 
-Rules:
-- 002, 003 and 004 must not create or alter `job_runs.deleted`.
-- 005 doesn't depend on them.
-- The 003 views can't reference `job_runs.deleted`. CI builds a fresh database in name order, so a 003 that references the column fails. If a view needs the column, a migration numbered 006 or later adds or replaces it.
-- `migrate.sh` prints a NOTICE for each file applied out of order.
+The two orders must give the same result, so:
+- 002, 003 and 004 must not create or alter `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`.
+- 002, 003 and 004 must not replace the `events_public_read` policy or the `venues` kind CHECK. 007 replaces both on Supabase before 002 to 004 run there.
+- 003's views must not reference `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`. On a fresh database, 003 runs before 005 to 007, so a view that references them fails CI. If a view needs one of them, a later migration, numbered above every migration already on Supabase, adds or replaces the view.
+- 005, 006 and 007 depend only on 001 (and each on the ones before it), never on 002 to 004.
+- `migrate.sh` applies any unrecorded file in name order, and prints a NOTICE for each file applied out of order. It never rejects a gap.
 
 ## Trade-offs
 
