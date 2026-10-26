@@ -5,9 +5,9 @@ only be started by hand. Its triggers must be exactly {workflow_dispatch}, howev
 the YAML is written, and no other workflow may mention Ticketmaster, so nothing can
 call it on a timer either.
 
-Skiddle: ingest-skiddle.yml is manual only until its first dry run has been reviewed
-and the approval conditions are recorded in 0001 (decision 0008). This check has no
-automatic release: adding the schedule means changing this test in the same PR.
+Skiddle: ingest-skiddle.yml runs nightly and by hand. Its triggers must be exactly
+{schedule, workflow_dispatch}, and the schedule is refused unless 0001 contains
+"Skiddle schedule: APPROVED", which is recorded with the approval email's conditions.
 """
 
 import re
@@ -21,6 +21,8 @@ WORKFLOWS = REPO / ".github" / "workflows"
 TICKETMASTER_WORKFLOW = WORKFLOWS / "ingest-ticketmaster.yml"
 SKIDDLE_WORKFLOW = WORKFLOWS / "ingest-skiddle.yml"
 DECISION_0001 = REPO / "docs" / "decisions" / "0001-sources-and-terms.md"
+SKIDDLE_APPROVAL = "Skiddle schedule: APPROVED"
+SKIDDLE_TRIGGERS = {"schedule", "workflow_dispatch"}
 
 
 def triggers(text: str) -> set[str]:
@@ -59,8 +61,54 @@ def test_ticketmaster_workflow_is_manual_only(not_cleared):
     assert guard_failures(TICKETMASTER_WORKFLOW.read_text()) == []
 
 
-def test_skiddle_workflow_is_manual_only():
-    assert guard_failures(SKIDDLE_WORKFLOW.read_text()) == []
+def skiddle_failures(workflow_text: str, decision_text: str) -> list[str]:
+    found = triggers(workflow_text)
+    if found != SKIDDLE_TRIGGERS:
+        return [f"triggers are {sorted(found)}, expected {sorted(SKIDDLE_TRIGGERS)}"]
+    approved = any(line.startswith(SKIDDLE_APPROVAL) for line in decision_text.splitlines())
+    return [] if approved else [f"0001 has no line starting {SKIDDLE_APPROVAL!r}"]
+
+
+def test_skiddle_workflow_is_scheduled_and_manual():
+    assert skiddle_failures(SKIDDLE_WORKFLOW.read_text(), DECISION_0001.read_text()) == []
+
+
+def test_skiddle_schedule_is_refused_without_the_approval_line():
+    without = "\n".join(
+        line
+        for line in DECISION_0001.read_text().splitlines()
+        if not line.startswith(SKIDDLE_APPROVAL)
+    )
+    assert SKIDDLE_APPROVAL not in without
+    assert skiddle_failures(SKIDDLE_WORKFLOW.read_text(), without) == [
+        f"0001 has no line starting {SKIDDLE_APPROVAL!r}"
+    ]
+
+
+def test_skiddle_approval_must_be_its_own_line():
+    mentioned = 'The schedule waits for "Skiddle schedule: APPROVED" to be recorded.\n'
+    assert skiddle_failures(SKIDDLE_WORKFLOW.read_text(), mentioned) != []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "on:\n  workflow_dispatch:\n",
+        "on:\n  schedule:\n    - cron: '0 2 * * *'\n",
+        "on:\n  schedule:\n    - cron: '0 2 * * *'\n  workflow_dispatch:\n  push:\n",
+        "on: [schedule, workflow_dispatch, workflow_call]\n",
+        "on: {schedule: [{cron: '0 2 * * *'}], workflow_dispatch: {}, repository_dispatch: {}}\n",
+    ],
+    ids=[
+        "manual only",
+        "schedule only",
+        "plus push",
+        "plus workflow_call",
+        "plus repository_dispatch",
+    ],
+)
+def test_skiddle_rejects_any_other_trigger_set(text):
+    assert skiddle_failures(text, f"{SKIDDLE_APPROVAL} (conditions recorded 26 Oct 2026)\n") != []
 
 
 def test_no_other_workflow_mentions_ticketmaster(not_cleared):

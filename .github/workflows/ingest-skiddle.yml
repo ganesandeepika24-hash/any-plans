@@ -1,10 +1,13 @@
 name: Ingest Skiddle
 
-# Manual only for now (decision 0008). The first Skiddle run is a manual dry run.
-# A schedule is added only after that run has been reviewed and the approval
-# conditions are recorded in 0001. jobs/tests/test_workflow_guard.py fails CI if
-# this workflow gets any trigger other than workflow_dispatch before then.
+# Nightly at 02:00 UTC, plus manual dispatch (decision 0008). The schedule is
+# allowed only while 0001 contains "Skiddle schedule: APPROVED";
+# jobs/tests/test_workflow_guard.py fails CI otherwise, or if any other trigger is added.
+# Scheduled runs have no inputs, so DRY_RUN is empty and the run writes. Manual
+# runs keep dry_run defaulting to true.
 on:
+  schedule:
+    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
