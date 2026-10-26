@@ -40,7 +40,7 @@ The SQL editor on the project shows that Supabase's default privileges give `ano
 
 `bootstrap.sql` recreates the same defaults in CI for both owners, so CI tests the real starting conditions. CLAUDE.md now requires every later migration to revoke and grant explicitly.
 
-**Role check on Supabase** (`select rolsuper, pg_has_role('postgres', 'supabase_admin', 'member') from pg_roles where rolname = 'postgres'`): **result not yet recorded.** Fill this in before 001 is applied to Supabase. If both values are false, expect the NOTICE, and the `supabase_admin` defaults stay as they are. That leaves them harmless for our objects, because our migrations create objects as `postgres` and revoke explicitly.
+**Role check on Supabase** (`select rolsuper, pg_has_role('postgres', 'supabase_admin', 'member') from pg_roles where rolname = 'postgres'`): `rolsuper = false`, `pg_has_role('postgres', 'supabase_admin', 'member') = false`. Checked on Supabase on 26 Oct 2026 via the SQL editor. So when 001 is applied there, expect the NOTICE, and the `supabase_admin` defaults stay as they are. That leaves them harmless for our objects, because our migrations create objects as `postgres` and revoke explicitly.
 
 ## Sources
 
@@ -48,7 +48,7 @@ Centre points are from OpenStreetMap via Nominatim, looked up on 2026-10-26, © 
 
 ## Trade-offs
 
-- **The `supabase_admin` revoke may not run on Supabase.** Objects Supabase itself creates in `public` could still be granted to `anon`. Our own objects are covered by explicit revokes. CI can't exercise the NOTICE path, because CI's `postgres` is a superuser. That path was checked by hand with a non-member role.
+- **The `supabase_admin` revoke won't run on Supabase** (see the role check above). Objects Supabase itself creates in `public` could still be granted to `anon`. Our own objects are covered by explicit revokes. CI can't exercise the NOTICE path, because CI's `postgres` is a superuser. That path was checked by hand with a non-member role.
 - **The CI database isn't exactly Supabase.** The roles, schemas and default privileges are recreated, but not Supabase's other schemas, `search_path` or role memberships.
 - **CI can't detect edits against a fresh database.** The PR diff check covers that, and the runner's checksums cover the real database.
 - **The 3-hour fallback is a guess.** It's a literal in the policy, not config, because RLS shouldn't read the private config table.
