@@ -11,7 +11,7 @@ Only sources whose terms allow our use are included. Where terms are unclear, th
 | Source | Used for | Free allowance | Key terms to honour | Status |
 |---|---|---|---|---|
 | Ticketmaster Discovery API | Main event feed, price checks | 5,000 calls a day; 2 or 5 a second (sources conflict) | Branding and linking rules; attribution; the terms reserve the right to limit bulk, non-user-initiated calls | **NOT CLEARED.** General Terms of Use (last updated 27 June 2023) read 26 Oct 2026. Bulk fetching isn't expressly prohibited, but the clause on rate-limiting calls "not primarily in response to direct user actions" applies. The production schedule stays off until Ticketmaster confirms in writing, or the owner decides to proceed knowingly. See "Ticketmaster conditions". |
-| Skiddle API | Clubs, gigs, comedy, festivals (UK) | Free key on application | **Non-commercial use only**; commercial use needs written approval | OK for a portfolio demo. Do not monetise. |
+| Skiddle API | Clubs, gigs, comedy, festivals (UK) | Free key on application | **Non-commercial use only**; commercial use needs written approval | OK for a portfolio demo. Do not monetise. See "Skiddle conditions". |
 | OpenStreetMap (Overpass) | Venue base layer: restaurants, bars, theatres, galleries | Free, with fair-use limits | ODbL attribution: "© OpenStreetMap contributors" in the footer and on the map | Attribution on UI; read terms before stage 1 |
 | Tavily | Capped web fallback: advanced search, max 16 calls a day, monthly ceiling 950 credits | 1,000 credits a month | Results saved for 24 hours only; show "Found on the web today" and link to source | **Set:** confirm on dashboard that failed calls are charged |
 | gov.uk bank holidays | Resolving "bank holiday weekend" | Free | Open Government Licence | OK |
@@ -25,6 +25,16 @@ From the terms review on 26 Oct 2026. These apply whether or not the nightly sch
 - **Takedown:** remove content within 24 hours of an owner's request, through an admin path (stage 2).
 - **Images:** display only, from Ticketmaster's URLs. Never re-host or copy them.
 - **Privacy:** a privacy policy linked in the site footer before launch.
+
+## Skiddle conditions
+
+Approval and API key received 25 Oct 2026. Conditions from the approval email, quoted exactly:
+
+> Please use this for all requests. Your account will initially be rate limited. If you wish for this limit to be increased, please contact dev@skiddle.com.
+>
+> Please note, for any commercial use of this API, please contact us on dev@skiddle.com or phone 03333 01 01 01 for approval before use
+
+Skiddle schedule: APPROVED (conditions recorded 26 Oct 2026)
 
 ## Sources explicitly out of scope
 
@@ -54,5 +64,5 @@ From the terms review on 26 Oct 2026. These apply whether or not the nightly sch
 - [x] Ticketmaster Terms of Use, especially bulk and non-user-initiated calls, and whether the nightly job fits. **Result: not cleared** (read 26 Oct 2026; see the Ticketmaster row and "Ticketmaster conditions").
 - [ ] Tavily: confirm on the dashboard that advanced search costs 2 credits, and whether failed or empty calls are charged.
 - [ ] OSM copyright and attribution page.
-- [x] Skiddle: API key requested 25 Oct 2026 as non-commercial portfolio use. Full project description emailed to dev@skiddle.com the same day. Website on the form is a GitHub profile (to be replaced at launch). Approved and key received 25 Oct 2026 (key saved in password manager as SKIDDLE_KEY; not in Lovable or the repo). Record any conditions from the approval email here verbatim. Reminder: replace the GitHub profile website with the live URL at launch, and ask for written approval before any commercial use.
+- [x] Skiddle: API key requested 25 Oct 2026 as non-commercial portfolio use. Full project description emailed to dev@skiddle.com the same day. Website on the form is a GitHub profile (to be replaced at launch). Approved and key received 25 Oct 2026 (key saved in password manager as SKIDDLE_KEY; not in Lovable or the repo). Conditions from the approval email are quoted under "Skiddle conditions" (recorded 26 Oct 2026). Reminder: replace the GitHub profile website with the live URL at launch, and ask for written approval before any commercial use.
 - [ ] Sign-up card requirements recorded for each account.
