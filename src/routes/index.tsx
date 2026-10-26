@@ -19,10 +19,10 @@ function Index() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-6">
       <div className="w-full max-w-xl text-center">
-        <h1 className="font-display text-6xl tracking-tight text-foreground sm:text-7xl">
-          Any Plans<span className="text-primary">?</span>
+        <h1 className="font-display text-5xl leading-tight tracking-tight text-foreground sm:text-6xl">
+          Find something to do in London
         </h1>
-        <p className="mt-4 text-lg text-muted-foreground">Find something to do in London</p>
+        <p className="mt-4 text-lg text-muted-foreground">One search, every plan in the city</p>
         <form className="mt-10" onSubmit={(e) => e.preventDefault()}>
           <label className="flex items-center gap-3 rounded-full border border-border bg-card px-5 py-4 shadow-soft focus-within:ring-2 focus-within:ring-ring">
             <Search className="h-5 w-5 text-muted-foreground" />
