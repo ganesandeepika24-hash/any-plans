@@ -50,6 +50,11 @@ Move hosts by changing one environment variable (`AGENT_URL` in the frontend) an
 
 ## Open checks
 
-- Render sign-up (25 Oct 2026): no card was requested. Account created. Free web service not yet deployed (step 0.4). If a card is requested later, record it here.
+- Render sign-up (25 Oct 2026): no card was requested. Account created.
+- Deployed 26 Oct 2026 from `main` (PR #1, commit 50da5ef), region Frankfurt, free instance (0.1 CPU, 512 MB), Docker runtime, root `agent/`, build filter `agent/**`, auto-deploy on commit. No paid add-ons selected.
+- **Cold start (measured 26 Oct 2026):** after the health check was turned off and the instance sat idle for 15 minutes, the first `/health` request returned 200 in 22.3 s. The next request returned 200 in 0.10 s. This is well inside the 90 s target in the metrics table. The health check was turned back on afterwards.
+- **Still open:** the Render-reported memory figure (Metrics tab), to be recorded once the service has been running under real traffic. The local cgroup measurement in 0005 (280 to 289 MB peak) is the current evidence.
+- Confirm the free instance is still 512 MB and 750 hours at the time of sign-up.
+- Confirm no paid service or add-on gets selected by default.
 - Confirm the free instance is still 512 MB and 750 hours at the time of sign-up.
 - Confirm no paid service or add-on gets selected by default.
