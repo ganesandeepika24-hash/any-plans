@@ -1,6 +1,7 @@
 name: Delete ended events
 
-# Decision 0007: no archive. Runs after the nightly ingest.
+# Decision 0007: no archive. Runs on its own schedule at 04:00 UTC and deletes
+# ended events whether or not any ingest ran that night.
 on:
   schedule:
     - cron: "0 4 * * *"
