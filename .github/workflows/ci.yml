@@ -106,5 +106,7 @@ jobs:
         env:
           PG: ${{ job.services.postgres.id }}
         run: |
-          docker exec "$PG" psql -U postgres -v ON_ERROR_STOP=1 -tAc \
+          # The image's init script puts postgis in the default database, so use a fresh one.
+          docker exec "$PG" createdb -U postgres -T template1 anyplans
+          docker exec "$PG" psql -U postgres -d anyplans -v ON_ERROR_STOP=1 -tAc \
             "create extension vector; create extension postgis; select extname || ' ' || extversion from pg_extension order by 1"
