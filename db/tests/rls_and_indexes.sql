@@ -49,7 +49,8 @@ begin
       raise exception '% cannot read cities, areas and venues', r;
     end if;
 
-    foreach t in array array['config', 'usage_daily', 'curated_pages', 'job_runs', 'schema_migrations'] loop
+    foreach t in array array['config', 'usage_daily', 'curated_pages', 'job_runs', 'schema_migrations',
+                             'price_snapshots'] loop
       begin
         execute format('select count(*) from public.%I', t);
         raise exception '% can read %', r, t;
@@ -214,6 +215,10 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '005' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 005';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '006' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 006';
+  end if;
 end $$;
 
 -- Migration 005: job_runs.deleted.
@@ -228,6 +233,38 @@ begin
   if has_column_privilege('anon', 'public.job_runs', 'deleted', 'select')
      or has_column_privilege('authenticated', 'public.job_runs', 'deleted', 'select') then
     raise exception 'job_runs.deleted is readable by anon or authenticated';
+  end if;
+end $$;
+
+-- Migration 006: price_snapshots.
+do $$
+begin
+  if (select pg_get_constraintdef(oid) from pg_constraint
+       where conrelid = 'public.price_snapshots'::regclass and contype = 'p')
+     is distinct from 'PRIMARY KEY (event_id, snapshot_date)' then
+    raise exception 'price_snapshots primary key is not (event_id, snapshot_date)';
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.price_snapshots'::regclass and contype = 'f'
+       and confrelid = 'public.events'::regclass and confdeltype = 'c'
+  ) then
+    raise exception 'price_snapshots.event_id does not cascade from events';
+  end if;
+
+  if (select pg_get_constraintdef(oid) from pg_constraint
+       where conrelid = 'public.price_snapshots'::regclass and contype = 'c'
+         and pg_get_constraintdef(oid) like '%status%')
+     is distinct from (select pg_get_constraintdef(oid) from pg_constraint
+       where conrelid = 'public.events'::regclass and contype = 'c'
+         and pg_get_constraintdef(oid) like '%status%') then
+    raise exception 'price_snapshots.status allows different values from events.status';
+  end if;
+
+  if has_table_privilege('anon', 'public.price_snapshots', 'insert')
+     or has_table_privilege('authenticated', 'public.price_snapshots', 'insert') then
+    raise exception 'anon or authenticated can insert into price_snapshots';
   end if;
 end $$;
 

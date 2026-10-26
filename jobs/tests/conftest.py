@@ -98,7 +98,14 @@ def db_url() -> str:
 @pytest.fixture
 def db(db_url):
     with psycopg.connect(db_url, autocommit=True) as conn:
-        for table in ("curated_pages", "events", "venues", "job_runs", "usage_daily"):
+        for table in (
+            "price_snapshots",
+            "curated_pages",
+            "events",
+            "venues",
+            "job_runs",
+            "usage_daily",
+        ):
             conn.execute(f"delete from public.{table}")  # noqa: S608 (fixed table names)
     database = Database.connect(db_url, read_only=False)
     yield database

@@ -1,0 +1,50 @@
+name: Snapshot prices
+
+# Decision 0009: one price row per current, priced event per local day. Runs at
+# 03:00 UTC, after the 02:00 Skiddle ingest and before the 04:00 delete job.
+# Scheduled runs have no inputs, so DRY_RUN is empty and the run writes. Manual
+# runs keep dry_run defaulting to true.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Count only. The database connection is read-only.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-writes
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: jobs
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: jobs/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Snapshot prices
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          uv run python -m jobs.snapshot_prices "${args[@]}"

@@ -1,4 +1,4 @@
-"""Delete ended events and orphaned Ticketmaster venues (decision 0007).
+"""Delete ended events, their price snapshots and orphaned Ticketmaster venues (0007).
 
 Usage: python -m jobs.delete_ended
 """
@@ -18,11 +18,15 @@ def run(db: Database, now: datetime) -> RunCounts:
     counts = RunCounts()
     run_id = db.start_run(JOB, None, now)  # spans every city
     with db.conn.transaction():
-        events = db.delete_ended_events(now, FALLBACK_DURATION)
+        events, snapshots = db.delete_ended_events(now, FALLBACK_DURATION)
         venues = db.delete_orphan_venues("ticketmaster")
-    counts.deleted = events + venues
+    counts.deleted = events + venues + snapshots
     db.finish_run(run_id, datetime.now(UTC) - now, counts)
-    print(json.dumps({"events_deleted": events, "venues_deleted": venues}))
+    print(
+        json.dumps(
+            {"events_deleted": events, "venues_deleted": venues, "snapshots_deleted": snapshots}
+        )
+    )
     return counts
 
 
