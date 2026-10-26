@@ -138,7 +138,17 @@ Rules:
   - 4,499 events within 25 km. The results reached only 19 Jan 2027, so 425 events were missed.
   - 46 duplicate IDs on neighbouring pages, which suggests some events were also skipped.
   - 28 event codes in the data, 19 of them unmapped at the time.
-- **Skiddle dry run 2:** not yet run. Acceptance is `complete = true` with no failed windows. Record here the windows, totals, calls, the page sizes seen, and the skipped-code counts.
+- **Dry run result (Skiddle, 26 Oct 2026).** Accepted: `complete = true` with no failed windows.
+  - **Workflow run:** `ingest-skiddle`, run 40394326316, with `dry_run` true and `save_sample` true, from `main` after PR #5 merged (`d82befb`). An earlier run from the same commit, 40393564051, also completed, with near-identical figures.
+  - **Outcome:** `complete` true; `cap_reached` null; `failed_windows` none; `split_windows` 0.
+  - **Calls:** 119.
+  - **Fetched:** 11,395 across 13 seven-day windows. Each window's `totalcount` matched its results. The largest window had 1,106, so no window came near the 10,000 limit.
+  - **In radius:** `events_in_radius` 5,057 within 25 km. Outside 25 km: 11.
+  - **Skipped codes:** TOUR 5,526; EXPER 332; EDU 52; NET 21; HEALTH 17; CONF 18; RELIG 3; HOBBY 1; AWARD 3; FUND 2; empty code 10.
+  - **Counts:** new 0, updated 0, failed 0, deleted 0 (dry run, read-only connection).
+  - **Note on `page_sizes`:** it lists the distinct page result counts seen across all pages (6 to 100). It isn't a Skiddle limit. Each full page is 100 results, and Skiddle's `pagecount` matched the result count on all 119 pages.
+  - **Note on duplicates:** windows share their boundary days, so `fetched` includes duplicates, which dedupe removes. Here that's 342: 11,395 fetched, less 5,057 in radius, 11 outside and 5,985 skipped.
+  - **Schedule status:** not added. It depends on 0001 recording the Skiddle approval conditions first, and it will land in a follow-up PR that also updates the guard test.
 - **Tests after the Skiddle changes:** 132 locally, with migrations 001 and 005 and the seeds. Fourteen more deliberate breaks each fail the suite:
   - paging past 10,000
   - no window split
