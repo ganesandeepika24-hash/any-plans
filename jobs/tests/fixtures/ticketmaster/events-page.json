@@ -1,0 +1,890 @@
+{
+ "_embedded": {
+  "events": [
+   {
+    "name": "Late Night Jazz",
+    "type": "event",
+    "id": "tm-jazz",
+    "url": "https://www.ticketmaster.co.uk/event/tm-jazz",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-14",
+      "localTime": "19:30:00",
+      "dateTime": "2026-11-14T19:30:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Music"
+      },
+      "genre": {
+       "name": "Jazz"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-jazz?locale=en-gb"
+     }
+    },
+    "priceRanges": [
+     {
+      "type": "standard",
+      "currency": "GBP",
+      "min": 25.0,
+      "max": 65.0
+     }
+    ],
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-jazz_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-jazz_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-jazz_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-jazz_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "Ronnie Scott's",
+       "type": "venue",
+       "id": "KovZ9177Xx0",
+       "address": {
+        "line1": "47 Frith Street"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.513630",
+        "longitude": "-0.131710"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZ9177Xx0"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Winter Market Day",
+    "type": "event",
+    "id": "tm-no-time",
+    "url": "https://www.ticketmaster.co.uk/event/tm-no-time",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-20",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": true
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Miscellaneous"
+      },
+      "genre": {
+       "name": "Family"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-no-time?locale=en-gb"
+     }
+    },
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-no-time_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-no-time_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-no-time_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-no-time_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "The O2",
+       "type": "venue",
+       "id": "KovZpZAEkn6A",
+       "address": {
+        "line1": "Peninsula Square"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.503040",
+        "longitude": "0.003170"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZpZAEkn6A"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Lights Exhibition",
+    "type": "event",
+    "id": "tm-multi-day",
+    "url": "https://www.ticketmaster.co.uk/event/tm-multi-day",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-05",
+      "localTime": "10:00:00",
+      "dateTime": "2026-11-05T10:00:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": true,
+     "end": {
+      "localDate": "2026-12-20",
+      "approximate": false,
+      "noSpecificTime": true
+     }
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Arts & Theatre"
+      },
+      "genre": {
+       "name": "Fine Art"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-multi-day?locale=en-gb"
+     }
+    },
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-multi-day_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-multi-day_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-multi-day_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-multi-day_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "The O2",
+       "type": "venue",
+       "id": "KovZpZAEkn6A",
+       "address": {
+        "line1": "Peninsula Square"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.503040",
+        "longitude": "0.003170"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZpZAEkn6A"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Stand-up Night",
+    "type": "event",
+    "id": "tm-cancelled",
+    "url": "https://www.ticketmaster.co.uk/event/tm-cancelled",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-10",
+      "localTime": "20:00:00",
+      "dateTime": "2026-11-10T20:00:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "cancelled"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Arts & Theatre"
+      },
+      "genre": {
+       "name": "Comedy"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-cancelled?locale=en-gb"
+     }
+    },
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-cancelled_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-cancelled_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-cancelled_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-cancelled_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "Ronnie Scott's",
+       "type": "venue",
+       "id": "KovZ9177Xx0",
+       "address": {
+        "line1": "47 Frith Street"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.513630",
+        "longitude": "-0.131710"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZ9177Xx0"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Postponed Gig",
+    "type": "event",
+    "id": "tm-postponed",
+    "url": "https://www.ticketmaster.co.uk/event/tm-postponed",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-12",
+      "localTime": "19:00:00",
+      "dateTime": "2026-11-12T19:00:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "postponed"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Music"
+      },
+      "genre": {
+       "name": "Rock"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-postponed?locale=en-gb"
+     }
+    },
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-postponed_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-postponed_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-postponed_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-postponed_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "The O2",
+       "type": "venue",
+       "id": "KovZpZAEkn6A",
+       "address": {
+        "line1": "Peninsula Square"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.503040",
+        "longitude": "0.003170"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZpZAEkn6A"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Cup Final",
+    "type": "event",
+    "id": "tm-no-price",
+    "url": "https://www.ticketmaster.co.uk/event/tm-no-price",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-22",
+      "localTime": "15:00:00",
+      "dateTime": "2026-11-22T15:00:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Sports"
+      },
+      "genre": {
+       "name": "Football"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-no-price?locale=en-gb"
+     }
+    },
+    "_embedded": {
+     "venues": [
+      {
+       "name": "The O2",
+       "type": "venue",
+       "id": "KovZpZAEkn6A",
+       "address": {
+        "line1": "Peninsula Square"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.503040",
+        "longitude": "0.003170"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZpZAEkn6A"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Mystery Event",
+    "type": "event",
+    "id": "tm-undefined",
+    "url": "https://www.ticketmaster.co.uk/event/tm-undefined",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-15",
+      "localTime": "18:00:00",
+      "dateTime": "2026-11-15T18:00:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Undefined"
+      },
+      "genre": {
+       "name": "Undefined"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-undefined?locale=en-gb"
+     }
+    },
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-undefined_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-undefined_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-undefined_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-undefined_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "Ronnie Scott's",
+       "type": "venue",
+       "id": "KovZ9177Xx0",
+       "address": {
+        "line1": "47 Frith Street"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.513630",
+        "longitude": "-0.131710"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZ9177Xx0"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Seaside Show",
+    "type": "event",
+    "id": "tm-brighton",
+    "url": "https://www.ticketmaster.co.uk/event/tm-brighton",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-16",
+      "localTime": "19:00:00",
+      "dateTime": "2026-11-16T19:00:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Music"
+      },
+      "genre": {
+       "name": "Pop"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-brighton?locale=en-gb"
+     }
+    },
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-brighton_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-brighton_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-brighton_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-brighton_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "Brighton Centre",
+       "type": "venue",
+       "id": "KovZ9177B1",
+       "address": {
+        "line1": "Kings Road"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "50.821460",
+        "longitude": "-0.145950"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZ9177B1"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Earlier Today",
+    "type": "event",
+    "id": "tm-ended",
+    "url": "https://www.ticketmaster.co.uk/event/tm-ended",
+    "dates": {
+     "start": {
+      "localDate": "2026-10-31",
+      "localTime": "18:00:00",
+      "dateTime": "2026-10-31T18:00:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Music"
+      },
+      "genre": {
+       "name": "Other"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-ended?locale=en-gb"
+     }
+    },
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-ended_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-ended_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-ended_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-ended_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "Ronnie Scott's",
+       "type": "venue",
+       "id": "KovZ9177Xx0",
+       "address": {
+        "line1": "47 Frith Street"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.513630",
+        "longitude": "-0.131710"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZ9177Xx0"
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Musical Matinee",
+    "type": "event",
+    "id": "tm-inverted-price",
+    "url": "https://www.ticketmaster.co.uk/event/tm-inverted-price",
+    "dates": {
+     "start": {
+      "localDate": "2026-11-18",
+      "localTime": "14:30:00",
+      "dateTime": "2026-11-18T14:30:00Z",
+      "dateTBD": false,
+      "dateTBA": false,
+      "timeTBA": false,
+      "noSpecificTime": false
+     },
+     "timezone": "Europe/London",
+     "status": {
+      "code": "onsale"
+     },
+     "spanMultipleDays": false
+    },
+    "classifications": [
+     {
+      "primary": true,
+      "segment": {
+       "name": "Arts & Theatre"
+      },
+      "genre": {
+       "name": "Musical"
+      }
+     }
+    ],
+    "_links": {
+     "self": {
+      "href": "/discovery/v2/events/tm-inverted-price?locale=en-gb"
+     }
+    },
+    "priceRanges": [
+     {
+      "type": "standard",
+      "currency": "GBP",
+      "min": 80.0,
+      "max": 20.0
+     }
+    ],
+    "images": [
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-inverted-price_640.jpg",
+      "width": 640,
+      "height": 360
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-inverted-price_1024.jpg",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "ratio": "16_9",
+      "url": "https://s1.ticketm.net/dam/tm-inverted-price_2048.jpg",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "ratio": "3_2",
+      "url": "https://s1.ticketm.net/dam/tm-inverted-price_3_2.jpg",
+      "width": 1024,
+      "height": 683
+     }
+    ],
+    "_embedded": {
+     "venues": [
+      {
+       "name": "Ronnie Scott's",
+       "type": "venue",
+       "id": "KovZ9177Xx0",
+       "address": {
+        "line1": "47 Frith Street"
+       },
+       "city": {
+        "name": "London"
+       },
+       "location": {
+        "latitude": "51.513630",
+        "longitude": "-0.131710"
+       },
+       "_links": {
+        "self": {
+         "href": "/discovery/v2/venues/KovZ9177Xx0"
+        }
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "_links": {
+  "self": {
+   "href": "/discovery/v2/events.json?page=0&size=200"
+  }
+ },
+ "page": {
+  "size": 200,
+  "totalElements": 10,
+  "totalPages": 1,
+  "number": 0
+ }
+}
