@@ -1,14 +1,16 @@
 name: Ingest Skiddle
 
+# Manual only for now (decision 0008). The first Skiddle run is a manual dry run.
+# A schedule is added only after that run has been reviewed and the approval
+# conditions are recorded in 0001. jobs/tests/test_workflow_guard.py fails CI if
+# this workflow gets any trigger other than workflow_dispatch before then.
 on:
-  schedule:
-    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
         description: Fetch and map only. The database connection is read-only.
         type: boolean
-        default: false
+        default: true
       save_sample:
         description: Upload the raw pages as an artifact.
         type: boolean

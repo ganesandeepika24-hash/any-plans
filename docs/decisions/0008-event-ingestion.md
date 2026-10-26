@@ -31,12 +31,13 @@ Step 1.1 fills the `events` table from Ticketmaster and Skiddle. The constraints
 
 **Workflows** all share the `db-writes` concurrency group, so they never overlap:
 - `ingest-ticketmaster.yml`: `workflow_dispatch` only, with `dry_run` defaulting to true.
-- `ingest-skiddle.yml`: nightly at 02:00 UTC, plus manual dispatch.
+- `ingest-skiddle.yml`: `workflow_dispatch` only for now, with `dry_run` defaulting to true. **Why:** the first Skiddle run is a manual dry run, because the fixtures are hand-written and Skiddle's field names and event codes are unconfirmed. The schedule (planned for 02:00 UTC) is added only after that dry run has been reviewed and the approval conditions are recorded in 0001.
 - `delete-ended-events.yml`: nightly at 04:00 UTC, plus manual dispatch.
 
 **Guard test.** `jobs/tests/test_workflow_guard.py` runs while 0001 doesn't say CLEARED for Ticketmaster:
 - It parses `ingest-ticketmaster.yml` with PyYAML, allowing for PyYAML reading `on` as `True`, and requires its triggers to be exactly `{workflow_dispatch}`.
 - It fails if any other workflow mentions Ticketmaster.
+- It also requires `ingest-skiddle.yml`'s triggers to be exactly `{workflow_dispatch}`. That check has no automatic release: adding the Skiddle schedule means changing the test in the same PR, after the 0001 update.
 - CI runs on changes to any workflow and to 0001.
 
 **Ticketmaster:**

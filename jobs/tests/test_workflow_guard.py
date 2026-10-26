@@ -1,8 +1,13 @@
-"""Ticketmaster stays unscheduled until decision 0001 says CLEARED.
+"""Ingest workflows stay manual until their source is approved for a schedule.
 
-While it isn't cleared, ingest-ticketmaster.yml may only be started by hand: its
-triggers must be exactly {workflow_dispatch}, however the YAML is written. No other
-workflow may mention Ticketmaster, so nothing can call it on a timer either.
+Ticketmaster: while decision 0001 doesn't say CLEARED, ingest-ticketmaster.yml may
+only be started by hand. Its triggers must be exactly {workflow_dispatch}, however
+the YAML is written, and no other workflow may mention Ticketmaster, so nothing can
+call it on a timer either.
+
+Skiddle: ingest-skiddle.yml is manual only until its first dry run has been reviewed
+and the approval conditions are recorded in 0001 (decision 0008). This check has no
+automatic release: adding the schedule means changing this test in the same PR.
 """
 
 import re
@@ -14,6 +19,7 @@ from tests.conftest import REPO
 
 WORKFLOWS = REPO / ".github" / "workflows"
 TICKETMASTER_WORKFLOW = WORKFLOWS / "ingest-ticketmaster.yml"
+SKIDDLE_WORKFLOW = WORKFLOWS / "ingest-skiddle.yml"
 DECISION_0001 = REPO / "docs" / "decisions" / "0001-sources-and-terms.md"
 
 
@@ -51,6 +57,10 @@ def not_cleared():
 
 def test_ticketmaster_workflow_is_manual_only(not_cleared):
     assert guard_failures(TICKETMASTER_WORKFLOW.read_text()) == []
+
+
+def test_skiddle_workflow_is_manual_only():
+    assert guard_failures(SKIDDLE_WORKFLOW.read_text()) == []
 
 
 def test_no_other_workflow_mentions_ticketmaster(not_cleared):
