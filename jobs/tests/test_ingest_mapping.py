@@ -27,11 +27,19 @@ def test_ticketmaster_items_are_filtered_and_counted():
 
 
 def test_skiddle_items_are_filtered_and_counted():
-    items = fixture("skiddle/events-page.json")["results"]
+    items = fixture("skiddle/events-page.json")["results"]  # 40 trimmed real events
     events, postponed, skipped = ingest._map(items, skiddle, LONDON, NOW, RunCounts())
-    assert len(events) == 6
+    assert len(events) == 26
     assert postponed == []
-    assert skipped == {"unmapped event code (DATE)": 1, "outside 25 km": 1}
+    assert skipped == {
+        "skipped event code (TOUR)": 2,
+        "skipped event code (empty)": 2,
+        **{
+            f"skipped event code ({c})": 1
+            for c in ("AWARD", "CONF", "EDU", "EXPER", "FUND", "HEALTH", "HOBBY", "NET", "RELIG")
+        },
+        "outside 25 km": 1,
+    }
 
 
 def test_a_malformed_item_counts_as_failed():
