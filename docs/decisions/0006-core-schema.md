@@ -91,6 +91,9 @@ Centre points are from OpenStreetMap via Nominatim, looked up on 2026-10-26, © 
    - `areas` has 33 borough rows and 20 neighbourhood rows.
    - All 33 boroughs have `default_radius_km = 6`.
 5. **Still to come.** The step 1.1 dry run has not happened. Migration 005 is not yet applied to Supabase; it will be applied after its PR is merged, following the same route.
+6. **Migration 005 applied through the SQL editor.** Migration 005 (`job_runs.deleted integer`) was applied to Supabase on 26 Oct 2026 through the SQL editor, after PR #3 merged as `a470daf`.
+7. **005 checksum backfilled.** Its `schema_migrations` row has checksum `65577a643fd571069b24aff1f2975bc02ae42665e2f8bcc248a479049d31efc7` (sha256 of `db/migrations/005_job_runs_deleted.sql`), set by a backfill where `checksum` was null.
+8. **005 post-apply checks passed:** `schema_migrations` lists 001 and 005, both with checksums; `job_runs.deleted` is `integer`.
 
 ## Changes
 
