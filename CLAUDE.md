@@ -33,7 +33,8 @@ This file tells Claude Code how to work on "Any Plans?". Read it at the start of
 - Every change needs tests. Run `pytest` and the eval suite locally before opening a PR.
 - Read every diff before committing, and be able to explain it. Note anything the AI got wrong in `docs/workflow-notes.md`.
 - Record each product or architecture choice in `docs/decisions/` (options, choice, metric, result).
-- Schema changes always come with a new numbered migration in `db/migrations/`. Never edit an applied migration.
+- Schema changes always come with a new numbered migration in `db/migrations/`. Never edit an applied migration. Apply migrations only with `db/ci/migrate.sh`, which records a checksum for each one.
+- Every migration after 001 revokes and grants explicitly. For each table, sequence and function it creates: revoke all from `anon` and `authenticated` (and from `public` for functions), grant back only what that object needs, and enable RLS on tables. Never rely on default privileges: Supabase's defaults give `anon` and `authenticated` full rights, and 001 may not be able to revoke the `supabase_admin` ones (decision 0006).
 - Every ingest job is idempotent, keyed by source and source ID, and writes a `job_runs` row.
 
 ## Secrets
