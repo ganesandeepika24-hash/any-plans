@@ -79,18 +79,25 @@ class Database:
         self.conn.rollback()
         return row[0] if row and row[0] is not None else 0
 
-    def events_missing_embedding(self, limit: int = 500) -> list[tuple[UUID, str]]:
-        with self.conn.cursor() as cur:
+    def embedding_candidates(self) -> list[dict]:
+        """Every event users can see, with the fields its embedding text is built from.
+
+        Duplicates and cancelled events are left out here, because the service role
+        bypasses events_public_read (0009).
+        """
+        with self.conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
-                select e.id, concat_ws(' · ', e.title, e.genre, v.name)
+                select e.id, e.title, e.category, e.genre, v.name as venue, e.description,
+                       e.embedding_hash
                   from public.events e left join public.venues v on v.id = e.venue_id
-                 where e.embedding is null
-                 limit %s
-                """,
-                (limit,),
+                 where e.duplicate_of is null and e.status = 'active'
+                 order by e.id
+                """
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+        self.conn.rollback()  # end the read, so each write batch commits on its own
+        return rows
 
     # Run records ----------------------------------------------------------
 
@@ -173,11 +180,12 @@ class Database:
                 insert into public.events (
                   city_id, source, source_id, title, category, genre, start_at, end_at,
                   venue_id, price_min, price_max, currency, url, image_url, geom,
-                  last_checked_at, status)
+                  last_checked_at, status, description)
                 values (%(city_id)s, %(source)s, %(source_id)s, %(title)s, %(category)s,
                         %(genre)s, %(start_at)s, %(end_at)s, %(venue_id)s, %(price_min)s,
                         %(price_max)s, %(currency)s, %(url)s, %(image_url)s,
-                        %(geom)s::extensions.geography, %(checked_at)s, %(status)s)
+                        %(geom)s::extensions.geography, %(checked_at)s, %(status)s,
+                        %(description)s)
                 on conflict (source, source_id) do update set
                   title = excluded.title, category = excluded.category, genre = excluded.genre,
                   start_at = excluded.start_at, end_at = excluded.end_at,
@@ -185,12 +193,8 @@ class Database:
                   price_max = excluded.price_max, currency = excluded.currency,
                   url = excluded.url, image_url = excluded.image_url, geom = excluded.geom,
                   last_checked_at = excluded.last_checked_at, status = excluded.status,
-                  -- The embedding text is title, genre and venue; re-embed when they change.
-                  embedding = case
-                    when events.title is distinct from excluded.title
-                      or events.genre is distinct from excluded.genre
-                      or events.venue_id is distinct from excluded.venue_id
-                    then null else events.embedding end
+                  -- embedding is left alone: the embedding job compares hashes (0009).
+                  description = excluded.description
                 returning (xmax = 0)
                 """,
                 {
@@ -211,6 +215,7 @@ class Database:
                     "geom": _point(event.lat, event.lon),
                     "checked_at": checked_at,
                     "status": event.status,
+                    "description": event.description,
                 },
             )
             return bool(cur.fetchone()[0])
@@ -550,11 +555,15 @@ class Database:
             deleted, kept = cur.fetchone()
             return deleted, kept
 
-    def set_embedding(self, event_id: UUID, vector: list[float]) -> None:
+    def set_embedding(self, event_id: UUID, vector: list[float], text_hash: str) -> None:
         with self.conn.cursor() as cur:
             cur.execute(
-                "update public.events set embedding = %s::extensions.vector where id = %s",
-                (_vector(vector), event_id),
+                """
+                update public.events
+                   set embedding = %s::extensions.vector, embedding_hash = %s
+                 where id = %s
+                """,
+                (_vector(vector), text_hash, event_id),
             )
 
 

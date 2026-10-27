@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.2d, event embeddings
+
+- **A CHECK that rejected every ordinary row.** `embedding_hash ~ '^[0-9a-f]{64}$' and embedding is not null` is false, not null, when both columns are null, so no event could be inserted. Caught by the db checks on a local container before commit. Fixed with `embedding_hash is null or (…)`.
+- **The brief didn't know embedding already existed.** Step 1.1 embedded events inside ingest. Found while planning, so the plan replaced that path instead of adding a second one.
+- **Description field names from memory.** The first plan named Skiddle `description` and Ticketmaster `info`/`description` from recall. Ticketmaster's reference confirmed its fields. Skiddle's docs name no response field, so its description isn't mapped.
+- **Two wrong test assumptions, caught on the first run:** a cancelled event counted as embeddable, and the first Skiddle fixture event was assumed to map (it's skipped).
+
 ## 2026-10-27: OSM venues diagnostic
 
 - **A test that couldn't see its own bug.** The diagnostic's owner test stored only OSM venues, so dropping the `source = 'osm'` filter from the count still passed. Found by a deliberate break; the test now adds a Skiddle venue as well.

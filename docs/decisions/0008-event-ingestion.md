@@ -89,7 +89,7 @@ Step 1.1 fills the `events` table from Ticketmaster and Skiddle. The constraints
 
 **Writes:**
 - Venues and events are upserted on `(source, source_id)`, one savepoint per event.
-- `last_checked_at` is set on every upsert. `embedding` is cleared when the title, genre or venue changes, and missing embeddings are filled after the writes.
+- `last_checked_at` is set on every upsert. Embeddings are no longer written here: since step 1.2d (0009), `embed_events` runs after dedupe and re-embeds rows whose text hash changed.
 - **The sweep** runs only for Ticketmaster, and only after a run with no failed windows, no cap hit and no failed items. That last condition is stricter than the plan: an event that failed to write shouldn't then be deleted as "vanished".
 
 **`job_runs`:**
@@ -102,10 +102,10 @@ Step 1.1 fills the `events` table from Ticketmaster and Skiddle. The constraints
 002 (logging), 003 (stage 3 metrics views) and 004 (watches) haven't been written yet. Migrations 005 (`job_runs.deleted`), 006 (`price_snapshots`), 007 (`events.duplicate_of`, the `pub` venue kind, `venues.website_url`) and 008 (`job_runs.data_as_of`) reach Supabase first. So on Supabase, 002 to 004 will be applied after them, out of name order. A fresh database, including CI's, applies every migration in name order.
 
 The two orders must give the same result, so:
-- 002, 003 and 004 must not create or alter `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`.
+- 002, 003 and 004 must not create or alter `job_runs.deleted`, `price_snapshots`, `events.duplicate_of`, `venues.website_url`, `events.description` or `events.embedding_hash`.
 - 002, 003 and 004 must not replace the `events_public_read` policy or the `venues` kind CHECK. 007 replaces both on Supabase before 002 to 004 run there.
 - 003's views must not reference `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`. On a fresh database, 003 runs before 005 to 007, so a view that references them fails CI. If a view needs one of them, a later migration, numbered above every migration already on Supabase, adds or replaces the view.
-- 005 to 008 depend only on 001 (and each on the ones before it), never on 002 to 004.
+- 005 to 009 depend only on 001 (and each on the ones before it), never on 002 to 004.
 - **007** (`007_duplicates_and_venue_fields.sql`, step 1.2b, decision 0009):
   - adds `events.duplicate_of` (`on delete set null`) with an index
   - drops and re-creates `events_public_read`, with `duplicate_of is null` added, in the same transaction
@@ -119,6 +119,10 @@ The two orders must give the same result, so:
   - the build plan gives 002 to 004 no `job_runs` change (checked 27 Oct 2026); 003's job-success view reads `job_runs` but doesn't need `data_as_of`
   - 002, 003 and 004 must not add or alter `job_runs.data_as_of`
   - 003's views must not reference it, because on a fresh database 003 runs before 008
+- **009** (`009_event_embedding_text.sql`, step 1.2d, decision 0009):
+  - adds `events.description` (at most 1,000 characters) and `events.embedding_hash` (sha256 hex, only alongside a vector)
+  - depends only on 001
+  - 002, 003 and 004 must not add or alter either column, and 003's views must not reference them
 - `migrate.sh` applies any unrecorded file in name order, and prints a NOTICE for each file applied out of order. It never rejects a gap.
 
 ## Trade-offs

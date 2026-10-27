@@ -13,7 +13,15 @@ from zoneinfo import ZoneInfo
 
 from jobs.geo import geohash
 from jobs.http import CapReached, Failure, RateLimitedClient, RequestFailed
-from jobs.normalise import Category, Event, Skipped, Venue, end_of_local_day, local_start
+from jobs.normalise import (
+    Category,
+    Event,
+    Skipped,
+    Venue,
+    clean_description,
+    end_of_local_day,
+    local_start,
+)
 from jobs.windows import Window
 
 SOURCE = "ticketmaster"
@@ -37,6 +45,9 @@ ARTS_AND_THEATRE: dict[str, Category] = {
 }
 MISCELLANEOUS: dict[str, Category] = {"Family": "Family", "Food & Drink": "Food & Drink"}
 NO_GENRE = {"Undefined", "Other"}
+# Event text fields, in order of preference (Discovery API v2 docs, read 27 Oct 2026; 0009).
+# pleaseNote and additionalInfo are logistics, such as entry rules, so they're left out.
+DESCRIPTION_FIELDS = ("info", "description")
 MAX_IMAGE_WIDTH = 1024
 
 
@@ -202,6 +213,9 @@ def parse(raw: dict[str, Any], tz: ZoneInfo) -> Event | Skipped:
         lon=venue.lon if venue else None,
         status="cancelled" if status == "cancelled" else "active",
         venue=venue,
+        description=next(
+            (d for f in DESCRIPTION_FIELDS if (d := clean_description(raw.get(f)))), None
+        ),
     )
 
 

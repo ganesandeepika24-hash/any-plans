@@ -1,4 +1,4 @@
-"""Integration tests against a database with migrations 001 and 005 and the seeds.
+"""Integration tests against a database with all migrations applied and the seeds.
 
 CI sets TEST_DATABASE_URL to the postgis service container. Locally they skip without it.
 """
@@ -10,9 +10,9 @@ import httpx
 import psycopg
 import pytest
 
-from jobs import delete_ended, ingest
+from jobs import delete_ended, embed_events, ingest
 from jobs.db import Database
-from tests.conftest import NOW, fixture
+from tests.conftest import NOW, FakeEmbedder, fixture
 
 pytestmark = pytest.mark.db
 
@@ -35,19 +35,7 @@ def tm_server(page=None, fail_window=None):
     return handler
 
 
-class FakeEmbedder:
-    def __init__(self, fail=False):
-        self.texts: list[str] = []
-        self.fail = fail
-
-    def __call__(self, texts):
-        if self.fail:
-            raise RuntimeError("embedding failed")
-        self.texts.extend(texts)
-        return [[0.1] * 384 for _ in texts]
-
-
-def run_tm(db, server=None, embedder=None, dry_run=False, now=NOW):
+def run_tm(db, server=None, dry_run=False, now=NOW):
     return ingest.run(
         "ticketmaster",
         db,
@@ -55,7 +43,6 @@ def run_tm(db, server=None, embedder=None, dry_run=False, now=NOW):
         "KEY",
         now=now,
         dry_run=dry_run,
-        embedder=embedder or FakeEmbedder(),
         sleep=lambda s: None,
     )
 
@@ -77,7 +64,8 @@ def test_ingest_writes_events_venues_and_a_job_run(db, sql):
     assert sql("select count(*) from venues where source = 'ticketmaster' and kind = 'other'") == [
         (2,)
     ]
-    assert sql("select count(*) from events where embedding is null") == [(0,)]
+    # Embedding is a separate job (embed_events), run by ingest.main after dedupe.
+    assert sql("select count(*) from events where embedding is not null") == [(0,)]
     assert sql("select count(*) from events where geom is null") == [(0,)]
 
     run = sql(
@@ -92,15 +80,27 @@ def test_ingest_writes_events_venues_and_a_job_run(db, sql):
 
 def test_a_second_run_updates_and_only_re_embeds_changed_text(db, sql):
     run_tm(db)
+    embed_events.run(db, NOW, dry_run=False, embedder=FakeEmbedder())
     page = fixture("ticketmaster/events-page.json")
     page["_embedded"]["events"][0]["name"] = "Late Night Jazz (extra show)"
+    summary = run_tm(db, tm_server(page))
     embedder = FakeEmbedder()
-    summary = run_tm(db, tm_server(page), embedder)
+    embedded = embed_events.run(db, NOW, dry_run=False, embedder=embedder)
 
     assert (summary.counts.new, summary.counts.updated) == (0, 6)
-    assert embedder.texts == ["Late Night Jazz (extra show) · jazz · Ronnie Scott's"]
+    # The upsert keeps the old vector until the embedding job replaces it.
+    assert sql("select count(*) from events where status = 'active' and embedding is null") == [
+        (0,)
+    ]
+    assert embedder.texts == ["Late Night Jazz (extra show) · Music · jazz · Ronnie Scott's"]
+    assert (embedded.counts.new, embedded.counts.updated, embedded.unchanged) == (0, 1, 4)
     assert sql("select calls from usage_daily where service = 'ticketmaster'") == [(26,)]
-    assert sql("select count(*) from job_runs") == [(2,)]
+    assert sql("select job from job_runs order by id") == [
+        ("ingest_ticketmaster",),
+        ("embed_events",),
+        ("ingest_ticketmaster",),
+        ("embed_events",),
+    ]
 
 
 def test_postponed_events_are_deleted(db, sql):
@@ -164,9 +164,13 @@ def test_no_sweep_when_the_daily_stop_is_hit(db, sql):
     assert sql("select calls from usage_daily where service = 'ticketmaster'") == [(4500,)]
 
 
-def test_a_crashed_run_keeps_duration_null_and_still_records_calls(db, sql):
+def test_a_crashed_run_keeps_duration_null_and_still_records_calls(db, sql, monkeypatch):
+    def fail(*args, **kwargs):
+        raise RuntimeError("write failed")
+
+    monkeypatch.setattr(db, "sweep_vanished", fail)  # after every fetch and upsert
     with pytest.raises(RuntimeError):
-        run_tm(db, embedder=FakeEmbedder(fail=True))
+        run_tm(db)
     assert sql("select duration_ms from job_runs") == [(None,)]
     assert sql("select calls from usage_daily where service = 'ticketmaster'") == [(13,)]
 
@@ -205,7 +209,6 @@ def test_skiddle_ingest(db, sql):
         "KEY",
         now=NOW,
         dry_run=False,
-        embedder=FakeEmbedder(),
         sleep=lambda s: None,
     )
     # The same page comes back for each of the 13 windows; duplicates are dropped.

@@ -1,6 +1,6 @@
 # 0009: Derived data (step 1.2)
 
-Status: accepted for price snapshots (2026-10-26), dedupe (2026-10-27) and OSM venues (2026-10-27). Owner: deepika. Revisit: when stage 3 builds price-trend views, if snapshot volume approaches the free-tier limit, or after the first real Ticketmaster dry run (to calibrate the dedupe threshold).
+Status: accepted for price snapshots (2026-10-26), dedupe (2026-10-27), OSM venues (2026-10-27) and event embeddings (2026-10-27). Owner: deepika. Revisit: when stage 3 builds price-trend views, if snapshot volume approaches the free-tier limit, or after the first real Ticketmaster dry run (to calibrate the dedupe threshold).
 
 ## Price snapshots (step 1.2a, migration 006)
 
@@ -217,3 +217,87 @@ The planner needs places as well as events: restaurants, bars, pubs, theatres, m
 - **Deliberate breaks:** 15 in the job and 3 in migration 008, each applied to a fresh database, all fail the suite.
 - **To record after the first dry run:** the extract file and its `data_as_of`, features read, venues selected, skip counts, and run time.
 - **Supabase:** 008 isn't applied yet. Apply it after merge in the SQL editor, with its checksum update in the same run (0006).
+
+## Event embeddings (step 1.2d, migration 009)
+
+### Context
+
+Search ranks events by meaning as well as by filters. The agent embeds queries with fastembed's all-MiniLM-L6-v2 (384 dimensions, decision 0005), so events must be embedded with the same model. `events.embedding vector(384)` and its HNSW index have existed since 001.
+
+Step 1.1 already embedded events inside `ingest.run()`, with the text `title · genre · venue`. The upsert cleared the vector when one of those columns changed (0008). That approach had four gaps:
+- category was left out, and descriptions weren't stored at all
+- renaming a venue didn't trigger a re-embed
+- duplicates and cancelled events were embedded, although users never see them
+
+### Options considered
+
+| Question | Options | Choice | Why |
+|---|---|---|---|
+| Change detection | Compare columns in the upsert (1.1); **store a hash of the embedded text on the row**; re-embed everything every night | Hash | Covers every input, including venue renames and fields added later, with no SQL to keep in step. A model change re-embeds too. |
+| Where it runs | Inside `ingest.run()`; **after dedupe in `ingest.main()`, plus a manual workflow**; its own schedule | After dedupe | Duplicates are already linked, so they're skipped. No new schedule. Same pattern and connection mode as dedupe. |
+| Sharing the model | Import `agent/app/embeddings.py`; **keep the copy in `jobs/jobs/embeddings.py`** | Copy | `agent/` and `jobs/` are separate uv projects. `test_embeddings_model.py` already fails CI if the model name or dimensions differ. |
+| Descriptions | Map the fields from memory; **map only fields the provider documents** | Documented only | See the source notes below. |
+
+### Decision
+
+- **Text:** title, category, genre, venue name and description, joined with ` · `, skipping empty fields.
+  - Description goes last: MiniLM truncates long input, so that's the part to lose.
+- **Hash:** `sha256(model name + "\n" + text)`, stored in `events.embedding_hash`. A run embeds a row only when the hash of its current text differs, so unchanged rows never reach the model.
+- **Selection:** only events users can see, `status = 'active'` and `duplicate_of is null`. The service role bypasses `events_public_read`, so the query filters both itself.
+  - An event that stops being a duplicate, or is restored from cancelled, has a missing or stale hash and is embedded on the next run.
+- **Writes:**
+  - Batches of 256, each committed on its own, so a failed run keeps the batches before it.
+  - Vectors are checked as 384 long before they're written.
+  - The ingest upsert no longer clears `embedding`. A changed event keeps its old vector until the embedding step replaces it.
+- **Job:** `python -m jobs.embed_events [--dry-run]`.
+  - `ingest.main()` runs it after dedupe, on the same connection and in the same mode.
+  - One `job_runs` row with `job 'embed_events'` and `city_id` null, because it spans cities.
+    - `fetched`: visible events read
+    - `new`: rows with no hash, embedded for the first time or for the first time since 009
+    - `updated`: rows whose text or model changed
+  - A crashed run keeps `duration_ms` null (0006).
+- **Dry run:** needs a read-only connection. It counts what it would embed, prints up to five texts, writes nothing and never loads the model. An ingest dry run gets a dry embedding run.
+- **Workflow:** `embed-events.yml` is manual only, for dry runs and backfills, with `dry_run` defaulting to true. It caches the model and uses the `db-writes` concurrency group.
+  - `test_workflow_guard.py` pins its triggers to exactly `{workflow_dispatch}`.
+- **Descriptions:**
+  - Stored in `events.description` as plain text: tags stripped, entities decoded, whitespace collapsed, and cut at a word boundary to at most 1,000 characters.
+  - **Ticketmaster:** `info`, falling back to `description`.
+    - Checked against the Discovery API v2 reference (developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/), read 27 Oct 2026. Its Event Search response lists:
+      - `description` ("Description's of the entity")
+      - `additionalInfo` ("Additional information of the entity")
+      - `info` ("Any information related to the event")
+      - `pleaseNote` ("Any notes related to the event")
+    - `pleaseNote` and `additionalInfo` are logistics, such as entry rules, so they're left out.
+    - No Ticketmaster sample was fetched. The order of preference is a judgement, not something the docs state.
+  - **Skiddle: not mapped.**
+    - The Events API docs (github.com/Skiddle/web-api/wiki/Events-API, wiki revision 3664cd1 of 18 Oct 2019, read 27 Oct 2026) document only a `description` request parameter. Its documented effect is that "your results will contain artist and genre information for each event".
+    - No page of the wiki names a response field for event text, and the ingest job doesn't send that parameter.
+    - Skiddle descriptions stay null until the field is confirmed, either from a saved sample (`ingest-skiddle.yml` with `save_sample`) or by asking dev@skiddle.com.
+- **Migration 009:**
+  - adds `events.description text` (at most 1,000 characters)
+  - adds `events.embedding_hash text`: 64 hex characters, allowed only alongside a vector
+  - creates no new objects, so it has no grants
+  - 001's table-level select lets `anon` and `authenticated` read both columns on visible events. Neither is sensitive.
+
+### Trade-offs
+
+- **Every run reads every visible event's text** to compare hashes. Retention (0007) bounds this to the events still ahead, about 5,000 to 10,000 rows.
+- **Stale vectors.** Between an ingest and its embedding step, a changed event is searched with its old vector. If the step fails, the stale vector stays until the next run. The ingest's own `job_runs` row is already recorded, and the workflow fails visibly.
+- **A one-off re-embed.** Vectors written before 009 have no hash, so the first run after merge re-embeds every visible event once.
+- **Most scheduled events have no description** while Skiddle's field is unconfirmed. Their text is title, category, genre and venue, which is richer than 1.1's text.
+- **Long descriptions are truncated by the model.** The title, category, genre and venue come first, so they're always embedded.
+
+### Metrics and results
+
+- **Tests:**
+  - **Results:** 275 jobs tests and the db checks pass locally against a throwaway `postgis/postgis:17-3.6` container (migrations 001 and 005 to 009), with a fake embedder. Nothing ran against Supabase, and no model was downloaded. An autouse fixture fails any test that loads the real model.
+  - **Behaviour covered:**
+    - the text, its order and the hash
+    - description cleaning and the Ticketmaster mapping, and that Skiddle's isn't mapped
+    - first runs, unchanged rows, and changes to the title, category, genre, description and venue name
+    - pre-009 vectors, a model change, and an event that stops being a duplicate
+    - batch commits, wrong-length vectors, dry runs and `job_runs`
+    - ingest's order: ingest, then dedupe, then embedding
+- **Deliberate breaks:** 15 in the job and 3 in migration 009 all fail the suite. The migration breaks were each applied to a fresh database.
+- **To record after the first scheduled run:** the `embed_events` row's `fetched`, `new` and `duration_ms` for the one-off re-embed, then a normal night's figures.
+- **Supabase:** apply 009 **before** merging. The nightly Skiddle ingest writes `events.description` and `embedding_hash`, so it fails without them. The migration only adds columns, so today's code runs unchanged on a database that has it. Apply it in the SQL editor with its checksum update in the same run (0006).
