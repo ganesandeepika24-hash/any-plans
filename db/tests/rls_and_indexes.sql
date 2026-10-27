@@ -235,6 +235,10 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '010' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 010';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '011' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 011';
+  end if;
 end $$;
 
 -- Migration 005: job_runs.deleted.
@@ -457,6 +461,36 @@ begin
   exception when insufficient_privilege then null;
   end;
   reset role;
+end $$;
+
+-- Migration 011: understand_context and the Understand config.
+do $$
+declare
+  fn constant regprocedure := 'public.understand_context(text)'::regprocedure;
+begin
+  if (select provolatile from pg_proc where oid = fn) <> 's'
+     or (select prosecdef from pg_proc where oid = fn)
+     or (select proconfig from pg_proc where oid = fn) is distinct from array['search_path=""'] then
+    raise exception 'understand_context must be stable, security invoker, with an empty search_path';
+  end if;
+
+  if has_function_privilege('anon', fn, 'execute')
+     or has_function_privilege('authenticated', fn, 'execute')
+     or exists (select 1 from pg_proc, aclexplode(proacl) a
+                 where oid = fn and a.grantee = 0 and a.privilege_type = 'EXECUTE')
+     or not has_function_privilege('service_role', fn, 'execute') then
+    raise exception 'understand_context must be executable by service_role only';
+  end if;
+
+  if (select count(*) from public.config
+       where key in ('llm_understand', 'understand_prompt') and version = 1 and is_active) <> 2 then
+    raise exception 'llm_understand or understand_prompt version 1 is missing or inactive';
+  end if;
+
+  if (select value_json->'providers'->0->>'provider' from public.config
+       where key = 'llm_understand' and is_active) is distinct from 'groq' then
+    raise exception 'llm_understand should try groq first';
+  end if;
 end $$;
 
 rollback;

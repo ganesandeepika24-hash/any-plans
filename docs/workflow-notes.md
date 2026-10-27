@@ -2,6 +2,15 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.5, Understand node
+
+- **A contradiction in the brief, raised before coding.** It asked for the model's JSON to be validated against `SearchFilters`, whose keys are absolute times and coordinates, while principle 5 gives that work to code. Settled with two models, with approval.
+- **An API that had moved.** The approved plan said Langfuse's batch ingestion endpoint. The current OpenAPI spec has none, and the documented plain-HTTP write path is now OTLP/HTTP. Caught by reading the spec before writing the client.
+- **PostgREST and geography.** Reading `areas.centre_geom` through PostgREST would have returned WKB, not coordinates. Added `understand_context()` in migration 011 instead.
+- **My seed parser invented aliases.** The test helper read `'{}'::text[]` as an alias named "{}". The uniqueness test caught it. `find_area` now also refuses a place that normalises to nothing.
+- **Three missed breaks in the first round:** text around a fenced reply, and partial place names ("Green" for Greenwich), had no tests. Both were added. The third "break" (a weekend end computed as start plus 60 hours) wasn't a bug, because Python adds a `timedelta` to an aware datetime in wall-clock time. It was replaced by a real one (summing in UTC), which the tests catch.
+- **A mock that didn't match PostgREST.** `httpx.Response(json=None)` sends an empty body, while PostgREST sends `null` for a function that returns null.
+
 ## 2026-10-27: step 1.3, search function and keep-alive
 
 - **Said a branch existed when it didn't.** The step 1.3 plan said `feat/search-function` had been created, but the command was never run. Noticed when starting the code.

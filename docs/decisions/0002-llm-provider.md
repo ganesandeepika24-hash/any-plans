@@ -71,3 +71,17 @@ Changing provider is a config change plus one eval run. If Groq limits drop or t
 - Confirm Cloudflare's rate limits from its limits page.
 - Make one test call per model, and record token counts and response-header limits as the first measured figures.
 - Confirm no payment method is attached to either account, and don't upgrade to a paid tier.
+
+## Step 1.5 follow-up (27 Oct 2026, decision 0012)
+
+Read from the providers' own pages. No live API calls were made.
+
+- **Groq limits** (console.groq.com/docs/rate-limits): `openai/gpt-oss-20b` and `openai/gpt-oss-120b` both show 30 requests a minute, 1,000 a day, 8,000 tokens a minute and 200,000 tokens a day. The page labels these "the base limits for the Developer plan" and doesn't break out free-plan figures, so check the account's own limits page. A 429 carries `retry-after`, and every response carries `x-ratelimit-*` headers.
+- **Groq structured output** (console.groq.com/docs/structured-outputs): strict mode (`strict: true`) supports `openai/gpt-oss-20b`. "All fields must be `required` and objects must set `additionalProperties: false`", and optional values are unions with null.
+- **Groq data** (console.groq.com/docs/your-data): "By default, Groq does not retain customer data for inference requests." Logs kept for troubleshooting or abuse investigations are "retained for up to **30 days**". "All customers may enable Zero Data Retention (ZDR)" in Data Controls (console.groq.com/settings/data-controls). The terms of use point to the Services Agreement for cloud services. That agreement wasn't readable here, so training use is still unconfirmed from the primary source.
+- **Cloudflare limits:**
+  - Workers Free includes "10,000 Neurons per day at no charge", and beyond that "further operations will fail with an error". Limits reset at 00:00 UTC (developers.cloudflare.com/workers-ai/platform/pricing/).
+  - `@cf/openai/gpt-oss-20b` costs 18,182 neurons per million input tokens and 27,273 per million output tokens.
+  - Text generation is limited to 300 requests a minute (developers.cloudflare.com/workers-ai/platform/limits/).
+  - Its model page doesn't say whether `response_format` JSON schema is supported, so the agent puts the schema in the prompt for Cloudflare.
+- **Still open, and needing the accounts:** one live test call per model (token counts and limit headers), turning on Groq's ZDR, and confirming no payment method is attached.

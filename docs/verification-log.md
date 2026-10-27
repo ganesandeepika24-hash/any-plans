@@ -9,9 +9,9 @@ Status key: **V** = verified against the provider's own page (fetched or quoted 
 | Item | Claim | Status | Source | Action before use |
 |---|---|---|---|---|
 | Gemini free tier, UK end users | Paid Services only for users in UK, EEA, CH | **V** | ai.google.dev/gemini-api/terms (effective 23 Mar 2026, page updated 28 Apr 2026) | None: ruled out |
-| Groq free tier limits | gpt-oss-120b: 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD (per org) | **S** | benchlm.ai (read 14 Sep 2026); localaimaster.com (Aug 2026) | Check console limits page after sign-up |
+| Groq free tier limits | gpt-oss-20b and 120b: 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD | **V** for the Developer plan (console.groq.com/docs/rate-limits, read 27 Oct 2026); free plan not broken out | console.groq.com/docs/rate-limits | Check the account's own limits page (0002 follow-up) |
 | Groq card needed | No card for free tier | **S** | Several guides | Confirm during sign-up |
-| Groq data use | Not used for training; logs up to 30 days for abuse and troubleshooting; ZDR toggle | **S** (Services Agreement quoted by third parties) | standardcompute.com (2 Sep 2026); community forum quoting terms | Read Groq's services agreement and console data controls |
+| Groq data use | No retention by default; troubleshooting and abuse logs up to 30 days; ZDR open to all customers in Data Controls. Training: not stated on that page | **V** for retention and ZDR (console.groq.com/docs/your-data, read 27 Oct 2026); **S** for training | console.groq.com/docs/your-data | Turn on ZDR; read the Services Agreement for training use |
 | Groq structured outputs | Strict mode only on gpt-oss 20b and 120b | **S** | console.groq.com docs snippet via search | Test with Pydantic in stage 1 |
 | Groq uptime | Several 20-min to 2.5-h incidents in early 2026 | **S** | Status aggregators | Check groqstatus.com directly |
 | Cloudflare free allocation | 10,000 Neurons a day, resets 00:00 UTC | **V** | developers.cloudflare.com/workers-ai/platform/pricing (updated 20 Oct 2026) | None |
