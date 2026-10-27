@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.understand.holidays import Holiday
+
 Category = Literal[
     "Music", "Comedy", "Theatre", "Sport", "Nightlife", "Arts", "Family", "Food & Drink"
 ]
@@ -31,8 +33,12 @@ WhenKind = Literal[
     "next_week",
     "weekday",
     "date",
+    "holiday",
 ]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+# What the model may say was too vague to search on. Code adds the other clarify
+# reasons (location, price_basis, event_date) from the fields below.
+Unclear = Literal["date", "budget", "category"]
 
 
 class _Strict(BaseModel):
@@ -41,18 +47,26 @@ class _Strict(BaseModel):
 
 class When(_Strict):
     kind: WhenKind
-    weekday: Weekday | None
+    weekday: Weekday | None  # with kind weekday, or alongside a date ("Friday 6 November")
+    qualifier: Literal["this", "next"] | None  # "this Thursday", "next Friday"
     month: int | None = Field(ge=1, le=12)
     day: int | None = Field(ge=1, le=31)
+    holiday: Holiday | None
 
     @model_validator(mode="after")
     def _parts_match_kind(self) -> Self:
-        if (self.weekday is not None) != (self.kind == "weekday"):
-            raise ValueError("weekday is set exactly when kind is 'weekday'")
+        if self.kind == "weekday" and self.weekday is None:
+            raise ValueError("kind 'weekday' needs a weekday")
+        if self.weekday is not None and self.kind not in ("weekday", "date"):
+            raise ValueError("weekday goes only with kind 'weekday' or 'date'")
+        if self.qualifier is not None and self.weekday is None:
+            raise ValueError("qualifier goes only with a weekday")
         if ((self.month, self.day) != (None, None)) != (self.kind == "date"):
             raise ValueError("month and day are set exactly when kind is 'date'")
         if self.kind == "date" and None in (self.month, self.day):
             raise ValueError("a date needs both month and day")
+        if (self.holiday is not None) != (self.kind == "holiday"):
+            raise ValueError("holiday is set exactly when kind is 'holiday'")
         return self
 
 
@@ -71,9 +85,13 @@ class UnderstoodQuery(_Strict):
     distance: Distance | None
     price_min: float | None = Field(ge=0)
     price_max: float | None = Field(ge=0)
+    price_scope: Literal["each", "total"] | None  # "£60 each", "£60 total"
     free: bool
+    near_me: bool  # "near me", "around here": needs the user's location
+    event: str | None = Field(max_length=100)  # a named event whose date the user didn't give
+    unclear: list[Unclear]
 
-    @field_validator("keywords", "place")
+    @field_validator("keywords", "place", "event")
     @classmethod
     def _blank_is_none(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
@@ -82,6 +100,11 @@ class UnderstoodQuery(_Strict):
     @classmethod
     def _empty_is_none(cls, value: list[str] | None) -> list[str] | None:
         return value or None
+
+    @field_validator("unclear")
+    @classmethod
+    def _no_repeats(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
 
 
 class SearchFilters(BaseModel):

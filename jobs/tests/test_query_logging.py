@@ -1,4 +1,4 @@
-"""queries and query_results (migration 002, decision 0013). Needs TEST_DATABASE_URL."""
+"""queries and query_results (migrations 002 and 013, decision 0013). Needs TEST_DATABASE_URL."""
 
 import uuid
 
@@ -25,7 +25,8 @@ def agent_row(**overrides) -> dict:
         "filters": {"categories": ["Music"]},
         "embedding_text": "jazz",
         "notes": [],
-        "config_versions": {"llm_understand": 1, "understand_prompt": 1, "ai_search_cap": 1},
+        "missing": [],
+        "config_versions": {"llm_understand": 1, "understand_prompt": 2, "ai_search_cap": 1},
         "release": "dev",
         "trace_id": "a" * 32,
         "latency_ms": 840,
@@ -198,21 +199,33 @@ def test_a_user_can_neither_write_queries_nor_read_results(db_url, service):
                 conn.execute(statement)
 
 
+def test_service_role_writes_a_clarify_row_with_its_filters_and_missing(service):
+    row = agent_row(status="needs_clarification", missing=["location", "date"])
+    insert(service, row)
+    got = service.execute(
+        "select status, filters, missing from public.queries where id = %s", (row["id"],)
+    ).fetchone()
+    assert got == ("needs_clarification", row["filters"], ["location", "date"])
+
+
 def test_the_cap_count_matches_what_the_agent_asks_for(service):
-    # The agent counts ok and ai_resting rows since midnight UTC (agent/app/querylog.py).
-    for status in ("ok", "ai_resting", "capped"):
+    # The agent counts ok, needs_clarification and ai_resting rows since midnight UTC
+    # (agent/app/querylog.py).
+    for status in ("ok", "needs_clarification", "ai_resting", "capped"):
         overrides = {"status": status}
-        if status != "ok":
+        if status == "needs_clarification":
+            overrides |= {"missing": ["date"]}
+        elif status != "ok":
             overrides |= {"filters": None, "provider": None}
         insert(service, agent_row(**overrides))
     insert(service, agent_row(user_id=str(uuid.uuid4())))
     count = service.execute(
         "select count(*) from public.queries where user_id = %s"
         " and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'"
-        " and status in ('ok', 'ai_resting')",
+        " and status in ('ok', 'needs_clarification', 'ai_resting')",
         (USER,),
     ).fetchone()[0]
-    assert count == 2
+    assert count == 3
 
 
 def test_the_cap_config_is_active(sql):

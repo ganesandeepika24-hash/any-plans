@@ -190,8 +190,28 @@ def test_bad_llm_config_rests_as_unavailable(signing_key, token):
 
 @pytest.mark.parametrize(
     "body",
-    [{"query": ""}, {"query": "   "}, {"query": "x" * 501}, {}, {"query": "a", "x": 1}],
-    ids=["empty", "blank", "too long", "missing", "extra field"],
+    [
+        {"query": ""},
+        {"query": "   "},
+        {"query": "x" * 501},
+        {},
+        {"query": "a", "x": 1},
+        {"query": "a", "location": {"lat": 91, "lon": 0}},
+        {"query": "a", "location": {"lat": "51.5", "lon": 0}},
+        {"query": "a", "location": {"lat": 51.5}},
+        {"query": "a", "location": {"lat": 51.5, "lon": 0, "accuracy": 5}},
+    ],
+    ids=[
+        "empty",
+        "blank",
+        "too long",
+        "missing",
+        "extra field",
+        "latitude out of range",
+        "latitude as string",
+        "location without lon",
+        "location extra field",
+    ],
 )
 def test_bad_bodies_are_422(harness, token, body):
     assert harness.post(body, token).status_code == 422
@@ -202,13 +222,17 @@ def test_bad_bodies_are_422(harness, token, body):
 
 
 def _queries_columns() -> set[str]:
+    """queries' columns: 002's create table plus the columns later migrations add."""
     sql = (REPO / "db" / "migrations" / "002_logging.sql").read_text()
     body = re.search(r"create table public\.queries \((.*?)\n\);", sql, re.S).group(1)
+    added = re.findall(
+        r"add column (\w+)", (REPO / "db" / "migrations" / "013_parse_clarify.sql").read_text()
+    )
     return {
         line.split()[0]
         for line in body.splitlines()
         if line.strip() and not line.strip().startswith(("constraint", "--"))
-    }
+    } | set(added)
 
 
 def test_the_row_matches_the_queries_columns(harness, token):
@@ -336,7 +360,7 @@ async def test_a_reservation_is_released_after_the_row_is_written_or_fails(signi
 async def test_a_reservation_is_released_if_understand_raises(signing_key):
     h = Harness(signing_key, cap={"per_user_per_day": 1})
 
-    async def boom(query):
+    async def boom(query, location=None):
         raise RuntimeError("bug")
 
     h.parser._understander.run = boom
@@ -357,3 +381,71 @@ async def test_the_cap_day_is_the_utc_day_even_in_summer_time(signing_key):
     h.parser._clock = lambda: datetime.fromisoformat("2026-07-01T00:30:00+01:00")
     await h.parser.parse(USER, "jazz tonight")
     assert h.log.since == [datetime(2026, 6, 30, tzinfo=UTC)]
+
+
+# Asking before searching (step 1.5) -------------------------------------------------
+
+NEAR_ME = reply(keywords="something", near_me=True, when=when("tonight"))
+WATERLOO = {"lat": 51.5031, "lon": -0.1132}
+
+
+def test_needs_clarification_answers_with_questions_and_the_filters_that_resolved(
+    signing_key, token
+):
+    h = Harness(signing_key, llm=FakeLLM(groq=[NEAR_ME], cloudflare=[]))
+    body = h.post({"query": "something near me tonight"}, token).json()
+    assert body["status"] == "needs_clarification" and body["reason"] is None
+    assert body["missing"] == ["location"]
+    assert body["filters"] == {
+        "date_from": "2026-10-28T20:00:00+00:00",
+        "date_to": "2026-10-29T05:00:00+00:00",
+    }
+    (q,) = body["questions"]
+    assert q == {
+        "reason": "location",
+        "question": "Something: which part of London, or should I use your location?",
+        "choices": ["Use my location", "Pick an area", "Drop a pin on the map"],
+    }
+    (row,) = h.log.rows
+    assert (row["status"], row["missing"], row["provider"]) == (
+        "needs_clarification",
+        ["location"],
+        "groq",
+    )
+    assert row["filters"] == body["filters"]
+
+
+def test_an_ok_reply_has_no_missing_or_questions(harness, token):
+    body = harness.post({"query": "jazz in soho tonight"}, token).json()
+    assert (body["status"], body["missing"], body["questions"]) == ("ok", [], [])
+    assert harness.log.rows[0]["missing"] == []
+
+
+def test_the_users_location_is_searched_but_never_logged_or_traced(signing_key, token):
+    h = Harness(signing_key, llm=FakeLLM(groq=[NEAR_ME], cloudflare=[]))
+    tracer = h.parser._understander._tracer
+    body = h.post({"query": "something near me tonight", "location": WATERLOO}, token).json()
+    assert body["status"] == "ok"
+    assert (body["filters"]["lat"], body["filters"]["lon"]) == (51.5031, -0.1132)
+    assert body["filters"]["radius_km"] == 1.609344
+    (row,) = h.log.rows
+    assert "lat" not in row["filters"] and "lon" not in row["filters"]
+    assert row["filters"]["radius_km"] == 1.609344
+    (trace,) = tracer.sent
+    assert "51.5031" not in str(trace.root.attributes) and "-0.1132" not in str(
+        trace.root.attributes
+    )
+
+
+def test_a_named_area_is_logged_with_its_point(signing_key, token):
+    h = Harness(signing_key)  # GOOD: jazz in Soho
+    body = h.post({"query": "jazz in soho tonight", "location": WATERLOO}, token).json()
+    assert h.log.rows[0]["filters"]["lat"] == body["filters"]["lat"] != 51.5031
+
+
+def test_clarify_rows_count_against_the_cap(signing_key, token):
+    h = Harness(signing_key, llm=FakeLLM(groq=[GOOD], cloudflare=[]))
+    h.log.preload(CAP["per_user_per_day"], status="needs_clarification")
+    body = h.post({"query": "jazz tonight"}, token).json()
+    assert (body["status"], body["reason"]) == ("ai_resting", "daily_cap")
+    assert "needs_clarification" in COUNTED_STATUSES

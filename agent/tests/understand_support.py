@@ -1,7 +1,7 @@
 """Shared test helpers for the Understand node. No network: everything here is local.
 
-The city comes from db/seed/areas.sql and the config from migration 011, so tests run
-against what ships, not a hand-made copy.
+The city comes from db/seed/areas.sql and the config from the migrations (models from
+011, the active prompt from 013), so tests run against what ships, not a hand-made copy.
 """
 
 import json
@@ -17,6 +17,7 @@ from app.understand.tracing import NullTracer, Trace
 
 REPO = Path(__file__).resolve().parents[2]
 MIGRATION_011 = REPO / "db" / "migrations" / "011_understand.sql"
+MIGRATION_013 = REPO / "db" / "migrations" / "013_parse_clarify.sql"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _QUOTED = r"'((?:[^']|'')*)'"
@@ -58,10 +59,9 @@ def london() -> City:
 
 
 def migration_config() -> dict[str, Any]:
-    """llm_understand and understand_prompt as migration 011 inserts them."""
-    sql = MIGRATION_011.read_text()
-    llm = re.search(r"\$json\$(.*?)\$json\$", sql, re.S).group(1)
-    prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", sql, re.S).group(1)
+    """llm_understand as migration 011 inserts it, and understand_prompt v2 from 013."""
+    llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_011.read_text(), re.S).group(1)
+    prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", MIGRATION_013.read_text(), re.S).group(1)
     return {"llm_understand": json.loads(llm), "understand_prompt": {"system": prompt}}
 
 
@@ -81,13 +81,31 @@ def reply(**fields: Any) -> str:
         "distance": None,
         "price_min": None,
         "price_max": None,
+        "price_scope": None,
         "free": False,
+        "near_me": False,
+        "event": None,
+        "unclear": [],
     }
     return json.dumps(base | fields)
 
 
-def when(kind: str, weekday: str | None = None, month: int | None = None, day: int | None = None):
-    return {"kind": kind, "weekday": weekday, "month": month, "day": day}
+def when(
+    kind: str,
+    weekday: str | None = None,
+    month: int | None = None,
+    day: int | None = None,
+    qualifier: str | None = None,
+    holiday: str | None = None,
+):
+    return {
+        "kind": kind,
+        "weekday": weekday,
+        "qualifier": qualifier,
+        "month": month,
+        "day": day,
+        "holiday": holiday,
+    }
 
 
 class FakeStore:

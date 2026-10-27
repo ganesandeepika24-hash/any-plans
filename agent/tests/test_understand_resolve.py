@@ -232,10 +232,10 @@ def test_an_unknown_place_with_a_distance_gets_one_note():
     assert [n.code for n in r.notes] == ["unknown_place"]
 
 
-def test_a_distance_without_a_place_is_dropped_with_a_note():
+def test_a_distance_without_a_place_asks_for_a_location():
     r = resolve(understood(distance={"value": 1, "unit": "km"}), WED_EVENING, CITY)
-    assert r.filters.radius_km is None
-    assert [n.code for n in r.notes] == ["distance_without_place"]
+    assert r.filters.radius_km is None and r.notes == ()
+    assert r.missing == ("location",)
 
 
 def test_london_itself_means_no_location_filter():

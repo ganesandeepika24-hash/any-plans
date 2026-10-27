@@ -2,6 +2,14 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.5, parser gaps
+
+- **Briefs that pointed at docs Claude Code can't read.** The seed queries and four rule docs live in claude.ai Project files, which aren't reachable from the codespace. Claude Code looked in the repo, the branches and the artifact list, then asked for them to be pasted rather than guess "the 30 queries".
+- **Seed-doc rows that contradicted their own query.** Row 32 ("this Thursday" meant 5 Nov, but this Thursday is 29 Oct) and row 22 ("Tuesday" asked on a Tuesday) were flagged before any code. The owner turned both into rules.
+- **A test helper that broke on the 31st.** `date.replace(day=day + 1)` failed for 31 Oct. Switched to `timedelta`.
+- **A deliberate break that passed for the wrong reason.** Removing a check line from 013 also removed a comma, so the migration failed to apply, and the "caught" result proved nothing. Redone with `check (true)`, which applies and is still caught.
+- **A deploy-order trap.** Prompt v2 is in a migration, but old agent code rejects v2 replies (strict schema). Recorded in 0012: apply 013 and deploy together.
+
 ## 2026-10-27: /parse smoke test
 
 - **A brief that couldn't work as written, raised before coding.** It asked the script to read the `queries` row with the user's token, but 002 made `queries` service-role only. Asked the owner, who chose a read-own-rows policy (migration 012).
