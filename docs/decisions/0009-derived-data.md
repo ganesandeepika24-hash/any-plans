@@ -1,6 +1,6 @@
 # 0009: Derived data (step 1.2)
 
-Status: accepted for price snapshots (2026-10-26) and dedupe (2026-10-27). Owner: deepika. Revisit: when stage 3 builds price-trend views, if snapshot volume approaches the free-tier limit, or after the first real Ticketmaster dry run (to calibrate the dedupe threshold). OSM venues (1.2c) will add a section here.
+Status: accepted for price snapshots (2026-10-26), dedupe (2026-10-27) and OSM venues (2026-10-27). Owner: deepika. Revisit: when stage 3 builds price-trend views, if snapshot volume approaches the free-tier limit, or after the first real Ticketmaster dry run (to calibrate the dedupe threshold).
 
 ## Price snapshots (step 1.2a, migration 006)
 
@@ -131,3 +131,74 @@ A crash leaves `duration_ms` null. The duration comes from a monotonic clock.
 - **Deliberate breaks:** 14 in the job and 6 in migration 007 (each applied to a fresh database) all fail the suite.
 - **To record after the first real Ticketmaster dry run:** pairs linked, false matches found by hand, and whether 0.85 holds.
 - **Supabase:** 007 isn't applied yet. It goes through the SQL editor after merge, with its checksum update in the same run (0006).
+
+## OpenStreetMap venues (step 1.2c, migration 008)
+
+### Context
+
+The planner needs places as well as events: restaurants, bars, pubs, theatres, museums and galleries. OpenStreetMap is the permitted source (0001; Foursquare stays dropped, 0003). On 26 Oct 2026 an Overpass count found 14,099 named venues of these kinds in Greater London. Of those, 6,090 had a `website` tag and only 9 had a booking tag.
+
+### Options considered
+
+| Area | Options | Choice | Why |
+|---|---|---|---|
+| Source | The public Overpass API; **Geofabrik's Greater London extract** | Geofabrik | Overpass refused our first query ("at capacity"), and its page asks automated users to run their own instance. Geofabrik rebuilds the extract daily, and one download a week is ordinary use. |
+| Boundary | Geofabrik's cut-out; **Greater London (relation 175342), built from the extract** | The relation | Geofabrik's cut-out has a buffer, so the relation is assembled from the extract and each venue's point is tested with shapely. |
+| Way locations | The average of the nodes; **the centre of the bounding box** | Bounding box | It's what Overpass's `out center` returns, so the job matches the documented query. |
+| Multipolygons | Assemble them; **skip them for now** | Skip | They're 22 of about 14,000 venues. Skipped relations are counted in the summary. |
+| Recording the data's date | The run summary only; **`job_runs.data_as_of` (migration 008)** | Column | Each run's row then shows which day's OSM data it used. The download date is the run's `started_at`. |
+
+### Decision
+
+- **Source:** https://download.geofabrik.de/europe/united-kingdom/england/greater-london-latest.osm.pbf (about 130 MB). The brief's `/great-britain/` path returns 404.
+  - It's read with pyosmium, which supplies node locations so a way's centre can be computed.
+  - **`data_as_of`** is the extract's replication timestamp, from the PBF header (`osmosis_replication_timestamp`). The fallback is Geofabrik's `greater-london-updates/state.txt`.
+- **Selection:** the Overpass query in `jobs/osm_venues.py`'s docstring.
+  - Named features with `amenity` = restaurant, bar, pub or theatre, or `tourism` = museum or gallery. If a feature has both, `amenity` wins.
+  - They must be inside relation 175342.
+  - A node uses its location; a way uses its bounding-box centre, rounded to 7 decimal places.
+  - Skipped and counted: relations (multipolygons), unnamed features, and features outside the boundary.
+- **Mapping:**
+  - `source 'osm'`, `source_id` as `node/<id>` or `way/<id>`, `city_id 'london'`.
+  - `kind`: restaurant, bar, pub, theatre, museum or gallery, all allowed by `venues_kind_check` (007).
+  - `address` from the `addr:*` tags.
+  - `booking_url`: the first of `website:booking`, `reservation:website` or `reservation:url`.
+  - `website_url`: `website`, or else `contact:website`.
+  - The upsert is on `(source, source_id)` and only touches rows whose data changed. So `new` and `updated` are real changes, and unchanged rows appear only in the summary.
+- **Complete run:** the file parsed in full, the boundary relation was built, and `data_as_of` is no more than 2 days older than the run's start.
+  - A parse error or a missing or incomplete boundary stops the run before any venue is written.
+  - An extract more than 2 days old, or with no timestamp, updates venues but deletes none.
+- **Vanished venues** (stored but not seen in this run) are deleted only after a complete run, and only if the run saw at least **90%** of the OSM venues already stored. That floor stops a selection bug from wiping the table.
+  - A venue with `curated_pages` is never deleted, because the cascade at `001_core.sql:128` would delete the pages. Those venues are kept and counted.
+- **Job:** `python -m jobs.osm_venues [--dry-run] [--file PATH]`.
+  - One `job_runs` row with `job 'osm_venues'`, `city_id 'london'` and `data_as_of`.
+  - `fetched` is every matching feature read from the file, before filters. `new` and `updated` are the upserts, and `deleted` is the vanished venues removed.
+  - A dry run is read-only and prints the counts it would write.
+- **Workflow:** `ingest-osm-venues.yml` is manual only, with `dry_run` defaulting to true.
+  - The weekly schedule (Sundays 05:00 UTC) is added after the first dry run has been reviewed.
+  - It uses the `db-writes` concurrency group.
+- **Embeddings** for venues wait for stage 2.
+- **ODbL:** the attribution, share-alike and no-merging rules in 0006.
+
+### Trade-offs
+
+- **A weekly snapshot.** Venues that open or close show up within a week.
+- **No booking links for most venues.** Only 9 London venues carry a booking tag, so the planner mostly links to `website_url`.
+- **Skipping multipolygons** drops some large venues, such as the British Museum and Shakespeare's Globe, until they're assembled.
+- **The 2-day freshness limit** leaves about half a day's margin if Geofabrik is late.
+- **The ODbL rules constrain future features.** Matching OSM venues to event venues needs a new decision first.
+
+### Metrics and results
+
+- **Tests:**
+  - **Results:** 230 jobs tests and the db checks pass locally, against migrations 001 and 005 to 008.
+  - **Fixture:** real City of London data, fetched from Overpass on 27 Oct 2026 without contributor metadata. City of London's boundary (relation 51800) stands in for Greater London.
+  - **Behaviour covered:**
+    - the selection, kinds, tag precedence and way centres
+    - the boundary: one real venue just over the City's edge is excluded
+    - parse errors, and missing or incomplete boundaries
+    - stale extracts, the 90% floor and curated pages
+    - dry runs, upserts and `job_runs`
+- **Deliberate breaks:** 15 in the job and 3 in migration 008, each applied to a fresh database, all fail the suite.
+- **To record after the first dry run:** the extract file and its `data_as_of`, features read, venues selected, skip counts, and run time.
+- **Supabase:** 008 isn't applied yet. Apply it after merge in the SQL editor, with its checksum update in the same run (0006).

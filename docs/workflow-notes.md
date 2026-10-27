@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.2c, OSM venues
+
+- **The brief's extract URL was wrong.** `/europe/great-britain/` returns 404; the extract lives under `/europe/united-kingdom/`. Caught by checking the URL before planning.
+- **The ODbL reading in the brief didn't match the licence text.** "Share-alike doesn't apply because we don't publish" conflicts with the ODbL summary, which covers public *use*. Caught by reading the summary and the OSMF guideline before writing 0006; the position was changed with approval.
+- **Contributor metadata nearly committed.** The first fixture used Overpass `out meta`, which includes OSM user names and IDs. Re-fetched with `out body`.
+- **A batch of edits silently not applied.** A multi-edit script stopped on its first failed match, after ruff had reformatted the file, and wrote nothing. Caught by checking the file before moving on.
+
 ## 2026-10-27: step 1.2b, cross-source dedupe
 
 - **Test cleanup broken twice by foreign keys.** The different-cities test added a Manchester city and removed it afterwards. The removal failed first because Manchester still had an event, then because dedupe had correctly written a Manchester `job_runs` row. Both were caught by running the tests against a real database; the cleanup now deletes events, then `job_runs`, then the city.

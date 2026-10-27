@@ -95,6 +95,22 @@ Centre points are from OpenStreetMap via Nominatim, looked up on 2026-10-26, © 
 7. **005 checksum backfilled.** Its `schema_migrations` row has checksum `65577a643fd571069b24aff1f2975bc02ae42665e2f8bcc248a479049d31efc7` (sha256 of `db/migrations/005_job_runs_deleted.sql`), set by a backfill where `checksum` was null.
 8. **005 post-apply checks passed:** `schema_migrations` lists 001 and 005, both with checksums; `job_runs.deleted` is `integer`.
 
+## OpenStreetMap data and the ODbL (27 Oct 2026)
+
+From step 1.2c, `venues` holds OpenStreetMap venues (`source = 'osm'`, decision 0009) alongside Ticketmaster and Skiddle venues. OpenStreetMap data is licensed under the Open Database Licence (ODbL).
+
+**This is our interpretation, not legal advice.**
+
+- **Attribution.** Wherever OSM-derived venues appear (venue lists, cards, maps, search results), show "© OpenStreetMap contributors" with a link to https://www.openstreetmap.org/copyright.
+- **Share-alike.** Showing these venues publicly likely counts as public use of an adapted database. So we offer the OSM-derived rows (`venues` where `source = 'osm'`: name, kind, address, location, booking and website URLs) under the ODbL on request.
+- **No matching or merging.** OSM venues are never matched or merged with Ticketmaster or Skiddle venues. Each data type stays either entirely OSM or entirely non-OSM, so share-alike can't reach data we aren't allowed to relicense. Changing this needs a new decision first.
+- **Event data isn't affected.** Ticketmaster and Skiddle events refer to their own venues, never to OSM ones.
+
+**Sources, read 27 Oct 2026:**
+- **OSM copyright page:** "Provide credit to OpenStreetMap by displaying our attribution notice", and to make clear the data is under the ODbL, "you may link to" the copyright page.
+- **ODbL human-readable summary (Open Data Commons):** "You must attribute any public use of the database, or works produced from the database". And: "If you publicly use any adapted version of this database, or works produced from an adapted database, you must also offer that adapted database under the ODbL."
+- **OSMF Collective Database Guideline** (endorsed 17 Jun 2016): "Two data sets need not be physically separated to qualify as 'independent'". And combining a proprietary list with OSM data after removing duplicates, if publicly used, "may be subject to the ODbL share-alike terms."
+
 ## Changes
 
 - **2026-10-26: borough default radius raised from 3 km to 6 km**, before 001 was merged or applied. A 3 km radius around a borough's centre point covers only part of the larger boroughs, such as Bromley, Hillingdon and Havering, so a search for "in Bromley" would miss much of it. Neighbourhoods stay at 1 km.

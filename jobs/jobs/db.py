@@ -413,6 +413,108 @@ class Database:
                     (list(links), list(links.values()), city_id),
                 )
 
+    # OpenStreetMap venues (decision 0009) -------------------------------------
+
+    def set_data_as_of(self, run_id: int, data_as_of: datetime | None) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "update public.job_runs set data_as_of = %s where id = %s", (data_as_of, run_id)
+            )
+        self.conn.commit()  # visible even if the run crashes later
+
+    def osm_venues(self) -> dict[str, tuple]:
+        """Stored OSM venues: source_id -> (name, kind, address, booking_url, website_url,
+        lat, lon), with coordinates rounded to OSM's 7 decimal places."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                select source_id, name, kind, address, booking_url, website_url,
+                       round(extensions.st_y(geom::extensions.geometry)::numeric, 7)::float8,
+                       round(extensions.st_x(geom::extensions.geometry)::numeric, 7)::float8
+                  from public.venues where source = 'osm'
+                """
+            )
+            return {row[0]: tuple(row[1:]) for row in cur.fetchall()}
+
+    def osm_venues_with_curated_pages(self) -> set[str]:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "select distinct v.source_id from public.venues v"
+                " join public.curated_pages c on c.venue_id = v.id where v.source = 'osm'"
+            )
+            return {row[0] for row in cur.fetchall()}
+
+    def upsert_osm_venues(self, city_id: str, venues: list) -> tuple[int, int]:
+        """Insert or update OSM venues in one statement. Rows whose data is unchanged
+        aren't touched. Returns (inserted, updated)."""
+        if not venues:
+            return 0, 0
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into public.venues
+                  (city_id, source, source_id, name, kind, address, geom, booking_url, website_url)
+                select %(city)s, 'osm', v.source_id, v.name, v.kind, v.address,
+                       extensions.st_setsrid(extensions.st_makepoint(v.lon, v.lat), 4326)
+                         ::extensions.geography,
+                       v.booking_url, v.website_url
+                  from unnest(%(ids)s::text[], %(names)s::text[], %(kinds)s::text[],
+                              %(addresses)s::text[], %(lons)s::float8[], %(lats)s::float8[],
+                              %(bookings)s::text[], %(websites)s::text[])
+                       as v(source_id, name, kind, address, lon, lat, booking_url, website_url)
+                on conflict (source, source_id) do update set
+                  name = excluded.name, kind = excluded.kind, address = excluded.address,
+                  geom = excluded.geom, booking_url = excluded.booking_url,
+                  website_url = excluded.website_url
+                 where (venues.name, venues.kind, venues.address, venues.booking_url,
+                        venues.website_url, extensions.st_asbinary(venues.geom))
+                       is distinct from
+                       (excluded.name, excluded.kind, excluded.address, excluded.booking_url,
+                        excluded.website_url, extensions.st_asbinary(excluded.geom))
+                returning (xmax = 0)
+                """,
+                {
+                    "city": city_id,
+                    "ids": [v.source_id for v in venues],
+                    "names": [v.name for v in venues],
+                    "kinds": [v.kind for v in venues],
+                    "addresses": [v.address for v in venues],
+                    "lons": [v.lon for v in venues],
+                    "lats": [v.lat for v in venues],
+                    "bookings": [v.booking_url for v in venues],
+                    "websites": [v.website_url for v in venues],
+                },
+            )
+            flags = [row[0] for row in cur.fetchall()]
+            return sum(flags), len(flags) - sum(flags)
+
+    def delete_vanished_osm_venues(self, seen: list[str]) -> tuple[int, int]:
+        """Delete OSM venues not in `seen`, except those with curated pages: the cascade
+        from venues (001_core.sql:128) would delete the pages too.
+        Returns (deleted, kept because they have curated pages)."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                with vanished as (
+                  select v.id,
+                         exists (select 1 from public.curated_pages c
+                                  where c.venue_id = v.id) as has_pages
+                    from public.venues v
+                   where v.source = 'osm' and v.source_id <> all(%(seen)s::text[])
+                ),
+                gone as (
+                  delete from public.venues v using vanished x
+                   where v.id = x.id and not x.has_pages
+                  returning v.id
+                )
+                select (select count(*) from gone),
+                       (select count(*) from vanished where has_pages)
+                """,
+                {"seen": seen},
+            )
+            deleted, kept = cur.fetchone()
+            return deleted, kept
+
     def set_embedding(self, event_id: UUID, vector: list[float]) -> None:
         with self.conn.cursor() as cur:
             cur.execute(
