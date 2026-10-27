@@ -144,6 +144,10 @@ jobs:
       - name: RLS and index tests
         run: $PSQL -X -v ON_ERROR_STOP=1 -f - < db/tests/rls_and_indexes.sql
 
+      # Generated data, rolled back afterwards. Fails if search_items' p95 reaches 500 ms (0010).
+      - name: search_items p95 under 500 ms
+        run: $PSQL -X -v ON_ERROR_STOP=1 -f - < db/tests/search_perf.sql
+
       # Last database step: it records a probe migration 002 in the CI database.
       - name: Out-of-order apply prints a notice
         run: |

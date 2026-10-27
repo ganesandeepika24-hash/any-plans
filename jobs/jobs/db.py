@@ -99,6 +99,20 @@ class Database:
         self.conn.rollback()  # end the read, so each write batch commits on its own
         return rows
 
+    def visible_event_count(self) -> int:
+        """Events the public can see under events_public_read (001, 007)."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                select count(*) from public.events
+                 where status = 'active' and duplicate_of is null
+                   and coalesce(end_at, start_at + interval '3 hours') > now()
+                """
+            )
+            count = cur.fetchone()[0]
+        self.conn.rollback()
+        return count
+
     # Run records ----------------------------------------------------------
 
     def start_run(self, job: str, city_id: str | None, started_at: datetime) -> int:
