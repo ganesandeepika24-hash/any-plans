@@ -36,6 +36,7 @@ This file tells Claude Code how to work on "Any Plans?". Read it at the start of
 - Schema changes always come with a new numbered migration in `db/migrations/`. Never edit an applied migration. Apply migrations only with `db/ci/migrate.sh`, which records a checksum for each one.
 - Every migration after 001 revokes and grants explicitly. For each table, sequence and function it creates: revoke all from `anon` and `authenticated` (and from `public` for functions), grant back only what that object needs, and enable RLS on tables. Never rely on default privileges: Supabase's defaults give `anon` and `authenticated` full rights, and 001 may not be able to revoke the `supabase_admin` ones (decision 0006).
 - Every ingest job is idempotent, keyed by source and source ID, and writes a `job_runs` row.
+- Agent and job queries that read events for users must filter `duplicate_of is null`. The service role bypasses the `events_public_read` policy, so it won't hide duplicates for you (decision 0009).
 
 ## Secrets
 

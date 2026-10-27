@@ -1,3 +1,5 @@
+import pytest
+
 from jobs import ingest
 from jobs.db import RunCounts
 from jobs.sources import skiddle, ticketmaster
@@ -107,3 +109,42 @@ def test_the_snapshot_dry_run_flag_opens_a_read_only_connection(monkeypatch):
         except StopAfterConnect:
             pass
     assert opened == [True, False]
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_ingest_runs_dedupe_afterwards_in_the_same_mode(monkeypatch, dry_run):
+    """A dry ingest gets a dry, read-only dedupe, so it can't write links."""
+    calls = []
+
+    class FakeDb:
+        def __init__(self, read_only):
+            self.read_only = read_only
+
+        def close(self):
+            calls.append("close")
+
+    def connect(url, read_only):
+        db = FakeDb(read_only)
+        calls.append(("connect", read_only))
+        return db
+
+    def fake_run(source, db, http, api_key, now, dry_run, on_page):
+        calls.append(("ingest", dry_run))
+        return ingest.Summary(source=source, dry_run=dry_run, counts=ingest.RunCounts())
+
+    def fake_dedupe(db, now, dry_run):
+        calls.append(("dedupe", dry_run, db.read_only))
+        return ingest.dedupe.Summary(dry_run=dry_run)
+
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://example")
+    monkeypatch.setenv("SKIDDLE_KEY", "KEY")
+    monkeypatch.setattr(ingest.Database, "connect", staticmethod(connect))
+    monkeypatch.setattr(ingest, "run", fake_run)
+    monkeypatch.setattr(ingest.dedupe, "run", fake_dedupe)
+    ingest.main(["skiddle", "--dry-run"] if dry_run else ["skiddle"])
+    assert calls == [
+        ("connect", dry_run),
+        ("ingest", dry_run),
+        ("dedupe", dry_run, dry_run),
+        "close",
+    ]

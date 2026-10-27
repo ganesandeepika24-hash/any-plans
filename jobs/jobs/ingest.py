@@ -21,7 +21,7 @@ import httpx
 import psycopg
 from pydantic import ValidationError
 
-from jobs import config
+from jobs import config, dedupe
 from jobs.db import Database, RunCounts
 from jobs.embeddings import embed
 from jobs.geo import haversine_km
@@ -215,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     db = Database.connect(settings.db_url, read_only=args.dry_run)
+    now = datetime.now(UTC).replace(microsecond=0)
     try:
         with httpx.Client(timeout=30) as http:
             summary = run(
@@ -222,14 +223,19 @@ def main(argv: list[str] | None = None) -> int:
                 db,
                 http,
                 api_key,
-                now=datetime.now(UTC).replace(microsecond=0),
+                now=now,
                 dry_run=args.dry_run,
                 on_page=_sample_writer(args.save_sample) if args.save_sample else None,
             )
+        print(json.dumps(asdict(summary), indent=2, default=str))
+        # After the ingest run has recorded its job_runs row, so a failed dedupe can't hide
+        # it. Same connection and mode: a dry ingest gives a read-only, dry dedupe, which
+        # sees only what is already stored (the dry ingest wrote nothing).
+        links = dedupe.run(db, now, dry_run=args.dry_run)
+        print(json.dumps({"dedupe": asdict(links)}, indent=2, default=str))
     finally:
         db.close()
 
-    print(json.dumps(asdict(summary), indent=2, default=str))
     if summary.cap_reached:
         print(f"::warning::{args.source}: stopped at the {summary.cap_reached}")
     return 1 if summary.failed_windows or summary.counts.failed else 0

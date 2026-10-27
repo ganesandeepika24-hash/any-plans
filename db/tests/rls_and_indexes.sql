@@ -219,6 +219,10 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '006' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 006';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '007' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 007';
+  end if;
 end $$;
 
 -- Migration 005: job_runs.deleted.
@@ -265,6 +269,68 @@ begin
   if has_table_privilege('anon', 'public.price_snapshots', 'insert')
      or has_table_privilege('authenticated', 'public.price_snapshots', 'insert') then
     raise exception 'anon or authenticated can insert into price_snapshots';
+  end if;
+end $$;
+
+-- Migration 007: duplicates and venue fields.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.events'::regclass and contype = 'f'
+       and confrelid = 'public.events'::regclass and confdeltype = 'n'
+       and pg_get_constraintdef(oid) like 'FOREIGN KEY (duplicate_of)%'
+  ) then
+    raise exception 'events.duplicate_of is missing or not on delete set null';
+  end if;
+
+  if not exists (select 1 from pg_indexes where indexname = 'events_duplicate_of_idx') then
+    raise exception 'events_duplicate_of_idx is missing';
+  end if;
+
+  if (select qual from pg_policies where tablename = 'events' and policyname = 'events_public_read')
+     not like '%duplicate_of IS NULL%' then
+    raise exception 'events_public_read does not hide duplicates';
+  end if;
+
+  if (select count(*) from pg_policies where tablename = 'events') <> 1 then
+    raise exception 'events should have exactly one policy';
+  end if;
+
+  if (select pg_get_constraintdef(oid) from pg_constraint
+       where conrelid = 'public.venues'::regclass and conname = 'venues_kind_check')
+     not like '%''pub''%' then
+    raise exception 'venues_kind_check does not allow pub';
+  end if;
+
+  if (select data_type from information_schema.columns
+       where table_schema = 'public' and table_name = 'venues' and column_name = 'website_url')
+     is distinct from 'text' then
+    raise exception 'venues.website_url is missing or not text';
+  end if;
+end $$;
+
+-- A pub venue can be inserted, and anon can't see an event marked as a duplicate.
+do $$
+declare
+  kept uuid;
+  visible text[];
+begin
+  insert into public.venues (city_id, source, source_id, name, kind)
+  values ('london', 'test', 'pub-1', 'Test pub', 'pub');
+
+  insert into public.events (city_id, source, source_id, title, category, start_at)
+  values ('london', 'test-a', 'kept', 'Kept', 'Music', now() + interval '1 day')
+  returning id into kept;
+  insert into public.events (city_id, source, source_id, title, category, start_at, duplicate_of)
+  values ('london', 'test-b', 'dup', 'Duplicate', 'Music', now() + interval '1 day', kept);
+
+  set local role anon;
+  select array_agg(source_id order by source_id) into visible
+    from public.events where source in ('test-a', 'test-b');
+  reset role;
+  if visible is distinct from array['kept'] then
+    raise exception 'anon sees % instead of only the kept record', visible;
   end if;
 end $$;
 

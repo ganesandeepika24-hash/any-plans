@@ -99,13 +99,20 @@ Step 1.1 fills the `events` table from Ticketmaster and Skiddle. The constraints
 
 ## Migration order (002 to 007)
 
-002 (logging), 003 (stage 3 metrics views) and 004 (watches) haven't been written yet. Migrations 005 (`job_runs.deleted`), 006 (`price_snapshots`) and 007 (planned: `events.duplicate_of`, the `pub` venue kind, `venues.website_url`) reach Supabase first. So on Supabase, 002 to 004 will be applied after them, out of name order. A fresh database, including CI's, applies every migration in name order.
+002 (logging), 003 (stage 3 metrics views) and 004 (watches) haven't been written yet. Migrations 005 (`job_runs.deleted`), 006 (`price_snapshots`) and 007 (`events.duplicate_of`, the `pub` venue kind, `venues.website_url`) reach Supabase first. So on Supabase, 002 to 004 will be applied after them, out of name order. A fresh database, including CI's, applies every migration in name order.
 
 The two orders must give the same result, so:
 - 002, 003 and 004 must not create or alter `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`.
 - 002, 003 and 004 must not replace the `events_public_read` policy or the `venues` kind CHECK. 007 replaces both on Supabase before 002 to 004 run there.
 - 003's views must not reference `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`. On a fresh database, 003 runs before 005 to 007, so a view that references them fails CI. If a view needs one of them, a later migration, numbered above every migration already on Supabase, adds or replaces the view.
 - 005, 006 and 007 depend only on 001 (and each on the ones before it), never on 002 to 004.
+- **007** (`007_duplicates_and_venue_fields.sql`, step 1.2b, decision 0009):
+  - adds `events.duplicate_of` (`on delete set null`) with an index
+  - drops and re-creates `events_public_read`, with `duplicate_of is null` added, in the same transaction
+  - replaces `venues_kind_check` (the name 001's inline check got), adding `pub`
+  - adds `venues.website_url`
+  - depends only on 001
+  - step 1.2c (OSM venues) uses its venue changes
 - `migrate.sh` applies any unrecorded file in name order, and prints a NOTICE for each file applied out of order. It never rejects a gap.
 
 ## Trade-offs

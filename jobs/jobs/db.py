@@ -11,6 +11,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import psycopg
+from psycopg.rows import dict_row
 
 from jobs.normalise import Event, Venue
 
@@ -337,6 +338,80 @@ class Database:
             )
             flags = [row[0] for row in cur.fetchall()]
             return sum(flags), len(flags) - sum(flags)
+
+    # Cross-source duplicates (decision 0009) ----------------------------------
+
+    def dedupe_cities(self) -> list[tuple[str, ZoneInfo]]:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "select distinct c.id, c.timezone from public.events e"
+                " join public.cities c on c.id = e.city_id order by c.id"
+            )
+            return [(city_id, ZoneInfo(tz)) for city_id, tz in cur.fetchall()]
+
+    def dedupe_candidates(
+        self, city_id: str, gap: timedelta, metres: float
+    ) -> list[dict[str, object]]:
+        """Pairs from different sources in one city, close in time and within `metres`.
+
+        Distance is measured on the geography columns, so it's in metres. Columns are
+        named and prefixed a_ and b_, so the two sides never share a name.
+        """
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                select a.id a_id, a.source a_source, a.source_id a_source_id,
+                       a.title a_title, a.start_at a_start_at, a.status a_status,
+                       a.city_id a_city_id, a.end_at a_end_at, a.price_min a_price_min,
+                       a.price_max a_price_max, a.currency a_currency,
+                       a.image_url a_image_url, a.url a_url, a.genre a_genre,
+                       a.venue_id a_venue_id,
+                       b.id b_id, b.source b_source, b.source_id b_source_id,
+                       b.title b_title, b.start_at b_start_at, b.status b_status,
+                       b.city_id b_city_id, b.end_at b_end_at, b.price_min b_price_min,
+                       b.price_max b_price_max, b.currency b_currency,
+                       b.image_url b_image_url, b.url b_url, b.genre b_genre,
+                       b.venue_id b_venue_id,
+                       extensions.st_distance(a.geom, b.geom) as metres
+                  from public.events a
+                  join public.events b
+                    on b.city_id = a.city_id
+                   and a.source < b.source
+                   and b.start_at between a.start_at - %(gap)s and a.start_at + %(gap)s
+                   and extensions.st_dwithin(a.geom, b.geom, %(metres)s)
+                 where a.city_id = %(city)s
+                """,
+                {"city": city_id, "gap": gap, "metres": metres},
+            )
+            return cur.fetchall()
+
+    def current_links(self, city_id: str) -> dict[UUID, UUID]:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "select id, duplicate_of from public.events"
+                " where city_id = %s and duplicate_of is not null",
+                (city_id,),
+            )
+            return dict(cur.fetchall())
+
+    def set_duplicates(self, city_id: str, links: dict[UUID, UUID]) -> None:
+        """Replace the city's links: clear every duplicate_of, then set `links`
+        (duplicate -> kept). Call inside a transaction so both steps land together."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "update public.events set duplicate_of = null"
+                " where city_id = %s and duplicate_of is not null",
+                (city_id,),
+            )
+            if links:
+                cur.execute(
+                    """
+                    update public.events e set duplicate_of = v.kept
+                      from unnest(%s::uuid[], %s::uuid[]) as v(duplicate, kept)
+                     where e.id = v.duplicate and e.city_id = %s
+                    """,
+                    (list(links), list(links.values()), city_id),
+                )
 
     def set_embedding(self, event_id: UUID, vector: list[float]) -> None:
         with self.conn.cursor() as cur:

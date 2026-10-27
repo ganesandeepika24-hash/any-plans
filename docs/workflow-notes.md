@@ -2,6 +2,11 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.2b, cross-source dedupe
+
+- **Test cleanup broken twice by foreign keys.** The different-cities test added a Manchester city and removed it afterwards. The removal failed first because Manchester still had an event, then because dedupe had correctly written a Manchester `job_runs` row. Both were caught by running the tests against a real database; the cleanup now deletes events, then `job_runs`, then the city.
+- **Names checked rather than assumed.** The brief asked to confirm 001's constraint name. Applying 001 to a scratch database confirmed `venues_kind_check` and the `events_public_read` expression before 007 was written.
+
 ## 2026-10-26: step 1.2a, price snapshots
 
 - **CI would have broken on the next migration.** The out-of-order probe in `ci.yml` checked for the literal text "005 is already applied", so adding 006 would have failed the db job. Caught while reading `ci.yml` during planning. It now works out the highest migration number from `db/migrations/`.
