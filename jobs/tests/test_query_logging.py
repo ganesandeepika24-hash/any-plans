@@ -130,18 +130,70 @@ def test_query_results_cascade_and_hold_no_event_details(service):
     assert service.execute("select count(*) from public.query_results").fetchone() == (0,)
 
 
-@pytest.mark.parametrize("role", ["anon", "authenticated"])
-def test_anon_and_authenticated_can_neither_read_nor_write(db_url, service, role):
+WRITES = (
+    "insert into public.queries (id, user_id, city_id, route, query_text, status)"
+    " values (gen_random_uuid(), '0f8fad5b-d9cb-469f-a165-70867728950e', 'london',"
+    " 'parse', 'q', 'capped')",
+    "update public.queries set query_text = 'changed'",
+    "delete from public.queries",
+)
+
+
+def as_user(conn, sub: str | None) -> None:
+    """Act as PostgREST does for a signed-in user: role authenticated, claims set."""
+    claims = "" if sub is None else f'{{"sub": "{sub}", "role": "authenticated"}}'
+    conn.execute("select set_config('request.jwt.claims', %s, false)", (claims,))
+    conn.execute("set role authenticated")
+
+
+def test_anon_can_neither_read_nor_write(db_url, service):
     insert(service, agent_row())
     with psycopg.connect(db_url, autocommit=True) as conn:
-        conn.execute(f"set role {role}")
-        for statement in (
-            "select * from public.queries",
-            "select * from public.query_results",
-            "insert into public.queries (id, user_id, city_id, route, query_text, status)"
-            " values (gen_random_uuid(), '0f8fad5b-d9cb-469f-a165-70867728950e', 'london',"
-            " 'parse', 'q', 'capped')",
-        ):
+        conn.execute("set role anon")
+        for statement in ("select * from public.queries", "select * from public.query_results"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(statement)
+        for statement in WRITES:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(statement)
+
+
+def test_a_user_reads_only_their_own_queries(db_url, service):
+    """Migration 012: what the /parse smoke test relies on."""
+    mine, theirs = agent_row(), agent_row(user_id=str(uuid.uuid4()))
+    insert(service, mine)
+    insert(service, theirs)
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        as_user(conn, USER)
+        assert conn.execute("select id::text from public.queries").fetchall() == [(mine["id"],)]
+        got = conn.execute(
+            "select attempts, trace_id from public.queries where id = %s", (mine["id"],)
+        ).fetchone()
+        assert got == (mine["attempts"], mine["trace_id"])
+        assert conn.execute(
+            "select count(*) from public.queries where id = %s", (theirs["id"],)
+        ).fetchone() == (0,)
+
+
+@pytest.mark.parametrize("sub", [None, "not-a-uuid-at-all"], ids=["no claims", "bad sub"])
+def test_without_a_usable_sub_a_user_reads_nothing(db_url, service, sub):
+    insert(service, agent_row())
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        as_user(conn, sub)
+        if sub is None:
+            assert conn.execute("select count(*) from public.queries").fetchone() == (0,)
+        else:
+            with pytest.raises(psycopg.errors.InvalidTextRepresentation):
+                conn.execute("select count(*) from public.queries")
+
+
+def test_a_user_can_neither_write_queries_nor_read_results(db_url, service):
+    insert(service, agent_row())
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        as_user(conn, USER)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("select * from public.query_results")
+        for statement in WRITES:
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(statement)
 

@@ -243,6 +243,10 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '002' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 002';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '012' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 012';
+  end if;
 end $$;
 
 -- Migration 005: job_runs.deleted.
@@ -509,9 +513,14 @@ begin
       raise exception '% has RLS off', tbl;
     end if;
     foreach r in array array['anon', 'authenticated'] loop
-      if has_table_privilege(r, tbl, 'select') or has_table_privilege(r, tbl, 'insert')
+      if has_table_privilege(r, tbl, 'insert')
          or has_table_privilege(r, tbl, 'update') or has_table_privilege(r, tbl, 'delete') then
-        raise exception '% has rights on %', r, tbl;
+        raise exception '% can write %', r, tbl;
+      end if;
+      -- 012 lets authenticated read its own queries rows; nothing else is readable.
+      if has_table_privilege(r, tbl, 'select')
+         and not (r = 'authenticated' and tbl = 'public.queries') then
+        raise exception '% can read %', r, tbl;
       end if;
     end loop;
     if not (has_table_privilege('service_role', tbl, 'select')
@@ -551,6 +560,38 @@ begin
   delete from public.queries where id = q;
   if exists (select 1 from public.query_results where query_id = q) then
     raise exception 'deleting a query left its results behind';
+  end if;
+end $$;
+
+-- Migration 012: authenticated reads only its own queries rows.
+do $$
+declare
+  mine constant uuid := '0f8fad5b-d9cb-469f-a165-70867728950e';
+  seen text[];
+begin
+  if (select count(*) from pg_policies where tablename = 'queries') <> 1
+     or (select cmd from pg_policies where tablename = 'queries') <> 'SELECT' then
+    raise exception 'queries should have exactly one policy, for select';
+  end if;
+
+  insert into public.queries (id, user_id, city_id, route, query_text, status) values
+    (gen_random_uuid(), mine, 'london', 'parse', 'mine', 'capped'),
+    (gen_random_uuid(), gen_random_uuid(), 'london', 'parse', 'theirs', 'capped');
+
+  perform set_config('request.jwt.claims', json_build_object('sub', mine)::text, true);
+  set local role authenticated;
+  select array_agg(query_text) into seen from public.queries where query_text in ('mine', 'theirs');
+  reset role;
+  if seen is distinct from array['mine'] then
+    raise exception 'authenticated sees % instead of only its own row', seen;
+  end if;
+
+  perform set_config('request.jwt.claims', '', true);
+  set local role authenticated;
+  select array_agg(query_text) into seen from public.queries where query_text in ('mine', 'theirs');
+  reset role;
+  if seen is not null then
+    raise exception 'authenticated with no claims sees %', seen;
   end if;
 end $$;
 
