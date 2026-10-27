@@ -27,8 +27,8 @@ def test_health_needs_no_token():
     assert "www-authenticate" not in response.headers
 
 
-def test_startup_compiles_graph():
+def test_startup_compiles_the_graph_without_touching_the_network():
+    # conftest's no_network fixture fails any real request, so startup must make none.
     app = create_app()
     with TestClient(app):
-        result = app.state.graph.invoke({"query": "jazz tonight"})
-    assert result["status"] == "not_implemented"
+        assert "understand" in app.state.graph.nodes

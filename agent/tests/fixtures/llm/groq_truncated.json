@@ -1,0 +1,23 @@
+{
+  "_note": "Synthetic: built from the provider's documented OpenAI-compatible response shape, not recorded from a live call. Replace with a recording after the first live test call (decision 0002, carried to step 1.5).",
+  "id": "chatcmpl-synthetic",
+  "object": "chat.completion",
+  "created": 1793131200,
+  "model": "openai/gpt-oss-20b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "reasoning": "Thinking..."
+      },
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 412,
+    "completion_tokens": 1024,
+    "total_tokens": 1436
+  }
+}

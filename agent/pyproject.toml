@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.162.0",
     "fastembed>=0.9.1",
+    "httpx>=0.28.1",
     "langgraph>=1.2.17",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
@@ -15,7 +16,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
 ]
@@ -31,7 +31,7 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "S107"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
