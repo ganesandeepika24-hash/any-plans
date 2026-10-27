@@ -105,6 +105,18 @@ def test_a_full_reply_validates():
     assert (q.keywords, q.when.weekday, q.distance.unit, q.price_max) == ("jazz", "fri", "mi", 20)
 
 
+def test_a_date_may_carry_its_weekday_and_unclear_parts_dedupe():
+    q = UnderstoodQuery.model_validate_json(
+        reply(
+            when=when("date", weekday="thu", qualifier="next", month=11, day=5),
+            unclear=["budget", "budget", "category"],
+            event="  ",
+        )
+    )
+    assert (q.when.weekday, q.when.qualifier, q.when.day) == ("thu", "next", 5)
+    assert (q.unclear, q.event) == (["budget", "category"], None)
+
+
 def test_blank_strings_and_empty_categories_mean_not_said():
     q = UnderstoodQuery.model_validate_json(reply(keywords="  ", place="", categories=[]))
     assert (q.keywords, q.place, q.categories) == (None, None, None)
@@ -141,6 +153,18 @@ def _invalid(**changes) -> str:
         _invalid(distance={"value": 0, "unit": "km"}),
         _invalid(distance={"value": 2, "unit": "miles"}),
         _invalid(keywords="x" * 201),
+        _invalid(when=when("weekday", weekday="fri", qualifier="last")),
+        _invalid(when=when("tonight", qualifier="next")),
+        _invalid(when=when("holiday")),
+        _invalid(when=when("holiday", holiday="diwali")),
+        _invalid(when=when("date", month=12, day=25, holiday="bank_holiday")),
+        _invalid(when=when("holiday", holiday="easter_monday", weekday="mon")),
+        _invalid(unclear=["location"]),
+        _invalid(unclear=None),
+        _invalid(unclear=...),
+        _invalid(near_me=...),
+        _invalid(price_scope="per person"),
+        _invalid(event="x" * 101),
         "[]",
         '"jazz tonight"',
     ],
@@ -163,6 +187,18 @@ def _invalid(**changes) -> str:
         "zero distance",
         "unknown unit",
         "keywords too long",
+        "unknown qualifier",
+        "qualifier without weekday",
+        "holiday kind without holiday",
+        "unknown holiday",
+        "holiday on another kind",
+        "weekday on a holiday",
+        "location isn't the model's to report",
+        "null unclear",
+        "missing unclear",
+        "missing near_me",
+        "unknown price scope",
+        "event too long",
         "array",
         "string",
     ],

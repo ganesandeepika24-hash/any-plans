@@ -94,3 +94,33 @@ The AI search bar has to turn "jazz in Soho tonight under £20" into the filters
   - confirming no card is attached
   - replacing the synthetic fixtures with recordings
 - **Supabase:** 011 isn't applied yet. Apply it with its checksum update in the same run (0006), and set `SUPABASE_SERVICE_KEY`, the provider keys and `LANGFUSE_*` on Render. Nothing calls the node until the search route exists.
+
+## Changes
+
+- **2026-10-27: asking before searching, holidays and the radius rule (step 1.5, migration 013).**
+  - **Why:** the eval-set review (step 1.6) found requests the parser either guessed at or couldn't express: "next Friday" on a Tuesday, "Bonfire Night this Thursday" (5 Nov is next Thursday), "cheap", "£60 total", "near me" with no location, "something fun", and events with no known date. The owner's rules (in the project docs `eval-ambiguity-rules-1.6`, `eval-location-rules-1.6`, `clarify-chips-1.6` and `festival-dates-2026-2027`): when a request could mean more than one thing, ask rather than guess.
+  - **New status:** `needs_clarification`, with `missing` (in this order: `location`, `date`, `budget`, `price_basis`, `event_date`, `category`) and one question per reason. The filters keep everything that did resolve, so the answer fills only the gap. `/parse` returns `missing` and `questions` (`reason`, `question`, `choices`) and logs `missing` in a new `queries` column. These rows count against the daily cap, because they spent a model call.
+  - **Who decides:** the model reports what it read, and code decides what to ask (principle 5). `UnderstoodQuery` gains `price_scope` (`each`, `total`), `near_me`, `event` (a named event with no date given) and `unclear` (`date`, `budget`, `category`: what the model couldn't pin down). `when` gains `qualifier` (`this`, `next`), a weekday alongside a date, and kind `holiday`. `understand_prompt` v2 (migration 013) describes them. v1 is kept, but v1 replies no longer validate.
+  - **Rules in code** (`resolve.py`):
+
+    | Request | Result |
+    |---|---|
+    | A weekday, bare or "this" | The next one, today included ("Tuesday" on a Tuesday is today) |
+    | "Next" + a weekday | A week today if it's that day; otherwise ask (`date`) |
+    | A date with a weekday | Resolves if they agree ("Friday 6 November", "5th Nov next Thursday"); otherwise ask (`date`) |
+    | A time the kinds can't express, or a seasonal activity with no time | Ask (`date`) |
+    | A named event with no date | Ask (`event_date`) |
+    | "Cheap" with no amount | Ask (`budget`) |
+    | A price for the whole group ("£60 total") | Ask (`price_basis`). "£60 each" or a plain "under £60" is per ticket |
+    | "Near me", or a distance with no place, and no point sent | Ask (`location`). This replaces the `distance_without_place` note |
+    | Nothing about what kind of thing ("something fun") | Ask (`category`), with chips: Music, Comedy, Food & Drink, Arts, Nightlife, Family, Sport, Just surprise me |
+
+  - **Location:** `/parse` accepts an optional `location` (`lat`, `lon`): a pin, or the browser's position for "near me". A named area wins over it. Around the user's point the radius is the slider's default, 1 mile (1.609344 km). The point is used for that search only: it's left out of the logged filters and the Langfuse trace.
+  - **Radius (unchanged, now tested as a rule):** a named area uses its stored `default_radius_km`, and a stated distance overrides it, converted to km and capped at 100 km. The UI slider (0.5 to 6 miles, default 1 mile, miles on cards) is the frontend's, so the parser doesn't cap at 6 miles.
+  - **Bank holidays:** from a snapshot of gov.uk's England and Wales list (`agent/app/understand/bank_holidays.json`, 2019 to 2028), refreshed with `agent/scripts/refresh_bank_holidays.py`. A test fails when it covers less than six months ahead. Searches never call gov.uk.
+    - Named moving days: Good Friday, Easter Sunday, Easter Monday, Easter weekend, the three May and August bank holidays, "the bank holiday" and "the bank holiday weekend".
+    - A long weekend runs from 17:00 on the evening before its first day off to 05:00 after its last, like any weekend. So Easter weekend 2027 is Thu 25 Mar 17:00 to Tue 30 Mar 05:00. The seed doc wrote Sat 27 to Mon 29 Mar, and the eval follows this rule instead.
+    - Days whose date never changes (Christmas Day, Boxing Day, Bonfire Night, Valentine's Day…) are plain dates to the model, so "Boxing Day" is 26 Dec, not the substitute day off on the 28th.
+  - **Not done here:** months ("in March"), date ranges ("14 to 15 November"), "any Saturday", seasons, and a festival calendar. Those requests ask or drop the date, and the eval (0014) counts them as failures.
+  - **Tests:** the agent has 364 tests, all passing with no network. The jobs tests (361) and the db checks pass against a local `postgis/postgis:17-3.6`. 21 deliberate breaks in the agent and 4 in migration 013 all fail the suite or the db checks.
+  - **Supabase:** apply 013 with `migrate.sh`, and deploy the agent in the same window. Once 013 is applied, prompt v2 is live, and an agent still running the old code would reject v2 replies, so search would rest until the deploy. The other order fails the same way. Apply 013 first, then deploy at once.

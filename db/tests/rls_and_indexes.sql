@@ -490,9 +490,11 @@ begin
     raise exception 'understand_context must be executable by service_role only';
   end if;
 
-  if (select count(*) from public.config
-       where key in ('llm_understand', 'understand_prompt') and version = 1 and is_active) <> 2 then
-    raise exception 'llm_understand or understand_prompt version 1 is missing or inactive';
+  -- 013 makes understand_prompt v2 active and keeps v1 for switching back.
+  if (select count(*) from public.config where key = 'llm_understand' and version = 1 and is_active) <> 1
+     or (select count(*) from public.config where key = 'understand_prompt' and version = 2 and is_active) <> 1
+     or (select count(*) from public.config where key = 'understand_prompt' and version = 1 and not is_active) <> 1 then
+    raise exception 'expected llm_understand v1 and understand_prompt v2 active, with prompt v1 kept';
   end if;
 
   if (select value_json->'providers'->0->>'provider' from public.config
@@ -561,6 +563,40 @@ begin
   if exists (select 1 from public.query_results where query_id = q) then
     raise exception 'deleting a query left its results behind';
   end if;
+end $$;
+
+-- Migration 013: needs_clarification rows keep their filters and say what's missing.
+do $$
+declare
+  ok_rows constant text[] := array[
+    $r$('ok', '{}', '[]')$r$,
+    $r$('needs_clarification', '{}', '["location", "date"]')$r$,
+    $r$('ai_resting', null, '[]')$r$,
+    $r$('capped', null, '[]')$r$];
+  bad_rows constant text[] := array[
+    $r$('needs_clarification', '{}', '[]')$r$,
+    $r$('needs_clarification', null, '["date"]')$r$,
+    $r$('ok', '{}', '["date"]')$r$,
+    $r$('ai_resting', null, '["date"]')$r$,
+    $r$('needs_clarification', '{}', '["weather"]')$r$,
+    $r$('needs_clarification', '{}', '{"date": 1}')$r$,
+    $r$('pending', null, '[]')$r$];
+  row_sql text;
+begin
+  foreach row_sql in array ok_rows loop
+    execute 'insert into public.queries (id, user_id, city_id, route, query_text, status, filters, missing)'
+            ' select gen_random_uuid(), gen_random_uuid(), ''london'', ''parse'', ''q'', s, f::jsonb, m::jsonb'
+            ' from (values ' || row_sql || ') v (s, f, m)';
+  end loop;
+  foreach row_sql in array bad_rows loop
+    begin
+      execute 'insert into public.queries (id, user_id, city_id, route, query_text, status, filters, missing)'
+              ' select gen_random_uuid(), gen_random_uuid(), ''london'', ''parse'', ''q'', s, f::jsonb, m::jsonb'
+              ' from (values ' || row_sql || ') v (s, f, m)';
+      raise exception 'queries accepted %', row_sql;
+    exception when check_violation then null;
+    end;
+  end loop;
 end $$;
 
 -- Migration 012: authenticated reads only its own queries rows.

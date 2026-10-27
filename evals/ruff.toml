@@ -1,0 +1,2 @@
+# Same rules as the agent: run_evals.py runs in the agent's environment.
+extend = "../agent/pyproject.toml"

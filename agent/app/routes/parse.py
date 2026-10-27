@@ -1,6 +1,7 @@
 """POST /parse: free text in, search_items filters out (decision 0013).
 
-Needs a valid Supabase JWT. ai_resting is a normal 200 reply: the browser then falls
+Needs a valid Supabase JWT. needs_clarification is a normal 200 reply: the browser asks
+the questions it carries instead of searching. So is ai_resting: the browser then falls
 back to filter-only search, which reads events directly (decision 0013).
 """
 
@@ -35,6 +36,6 @@ async def parse(
             detail="Invalid or missing token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
-    outcome = await parser.parse(user_id, body.query)
+    outcome = await parser.parse(user_id, body.query, body.location)
     background.add_task(parser.record, outcome)
     return outcome.response

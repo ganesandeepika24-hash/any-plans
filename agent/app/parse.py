@@ -2,7 +2,8 @@
 
 1. Check the user's daily cap (config ai_search_cap, counted from today's queries rows
    since midnight UTC). At the cap, no model is called and the reply is ai_resting.
-2. Run the Understand step.
+2. Run the Understand step. A request may carry the user's own point (a pin, or their
+   location for "near me"); it's used for that search only, and never logged.
 3. Build the queries row. The route writes it after the response is sent; a failed
    write is logged and never fails the request.
 
@@ -25,7 +26,8 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.querylog import QueryLog, QueryLogError
-from app.understand.node import AI_RESTING, MAX_QUERY_CHARS, Understander
+from app.understand.node import AI_RESTING, MAX_QUERY_CHARS, Understander, stored_filters
+from app.understand.resolve import Point
 from app.understand.store import Store, StoreError
 
 log = logging.getLogger(__name__)
@@ -42,10 +44,18 @@ class CapConfig(BaseModel):
     per_user_per_day: int = Field(ge=0, le=1000)
 
 
+class Location(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
 class ParseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1, max_length=MAX_QUERY_CHARS)
+    location: Location | None = None  # the user's pin or position, for this search only
 
     @field_validator("query")
     @classmethod
@@ -61,14 +71,22 @@ class NoteOut(BaseModel):
     message: str
 
 
+class QuestionOut(BaseModel):
+    reason: str
+    question: str
+    choices: list[str]
+
+
 class ParseResponse(BaseModel):
-    status: Literal["ok", "ai_resting"]
+    status: Literal["ok", "needs_clarification", "ai_resting"]
     reason: Reason | None = None  # set when status is ai_resting
     message: str | None = None
     query_id: UUID
     filters: dict[str, Any] | None = None  # search_items' jsonb argument
     embedding_text: str | None = None
     notes: list[NoteOut] = []
+    missing: list[str] = []  # set when status is needs_clarification
+    questions: list[QuestionOut] = []  # one per missing reason, in the same order
     trace_id: str | None = None
 
 
@@ -100,7 +118,9 @@ class Parser:
         self._admit_lock = asyncio.Lock()
         self._pending: Counter[tuple[UUID, date]] = Counter()
 
-    async def parse(self, user_id: UUID, query: str) -> ParseOutcome:
+    async def parse(
+        self, user_id: UUID, query: str, location: Location | None = None
+    ) -> ParseOutcome:
         started = self._monotonic()
         query_id = uuid4()
         day = self._clock().astimezone(UTC).date()
@@ -123,13 +143,15 @@ class Parser:
         reservation = (user_id, day)
 
         try:
-            result = await self._understander.run(query)
+            point = Point(location.lat, location.lon) if location is not None else None
+            result = await self._understander.run(query, point)
         except BaseException:
             self._release_reservation(reservation)
             raise
 
         notes = [NoteOut(**asdict(n)) for n in result.notes]
         filters = result.filters.to_json() if result.filters else None
+        missing = list(result.missing)
         reason: Reason | None = None
         if result.status == "ai_resting":
             reason = "providers" if result.attempts else "unavailable"
@@ -141,6 +163,11 @@ class Parser:
             filters=filters,
             embedding_text=result.query_text,
             notes=notes,
+            missing=missing,
+            questions=[
+                QuestionOut(reason=q.reason, question=q.question, choices=list(q.choices))
+                for q in result.questions
+            ],
             trace_id=result.trace_id,
         )
         row = self._row(
@@ -154,9 +181,10 @@ class Parser:
                 {"provider": a.provider, "model": a.model, "outcome": a.outcome}
                 for a in result.attempts
             ],
-            filters=filters,
+            filters=stored_filters(result),
             embedding_text=result.query_text,
             notes=[n.model_dump() for n in notes],
+            missing=missing,
             config_versions=result.config_versions | cap_versions,
             trace_id=result.trace_id,
         )
@@ -215,10 +243,11 @@ class Parser:
         filters: dict[str, Any] | None = None,
         embedding_text: str | None = None,
         notes: list[dict[str, str]] | None = None,
+        missing: list[str] | None = None,
         config_versions: dict[str, int],
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """A queries row (migration 002; columns proposed in 0013)."""
+        """A queries row (migration 002, plus missing from 013; columns proposed in 0013)."""
         return {
             "id": str(query_id),
             "user_id": str(user_id),
@@ -231,6 +260,7 @@ class Parser:
             "filters": filters,
             "embedding_text": embedding_text,
             "notes": notes or [],
+            "missing": missing or [],
             "config_versions": config_versions,
             "release": self._release,
             "trace_id": trace_id,

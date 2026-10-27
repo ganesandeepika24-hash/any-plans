@@ -11,7 +11,7 @@ from uuid import UUID
 import httpx
 
 TIMEOUT_S = 5.0
-COUNTED_STATUSES = ("ok", "ai_resting")  # capped requests don't count against the cap
+COUNTED_STATUSES = ("ok", "needs_clarification", "ai_resting")  # capped ones don't count
 
 
 class QueryLogError(Exception):

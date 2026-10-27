@@ -38,7 +38,7 @@ async def test_count_asks_postgrest_for_an_exact_count(content_range, count):
         "select": "id",
         "user_id": f"eq.{USER}",
         "created_at": "gte.2026-10-28T00:00:00+00:00",
-        "status": "in.(ok,ai_resting)",
+        "status": "in.(ok,needs_clarification,ai_resting)",
         "limit": "1",
     }
     assert request.headers["prefer"] == "count=exact"
