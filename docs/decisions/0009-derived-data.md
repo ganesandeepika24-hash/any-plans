@@ -174,8 +174,10 @@ The planner needs places as well as events: restaurants, bars, pubs, theatres, m
   - One `job_runs` row with `job 'osm_venues'`, `city_id 'london'` and `data_as_of`.
   - `fetched` is every matching feature read from the file, before filters. `new` and `updated` are the upserts, and `deleted` is the vanished venues removed.
   - A dry run is read-only and prints the counts it would write.
-- **Workflow:** `ingest-osm-venues.yml` is manual only, with `dry_run` defaulting to true.
-  - The weekly schedule (Sundays 05:00 UTC) is added after the first dry run has been reviewed.
+- **Workflow:** `ingest-osm-venues.yml` runs weekly on Sundays at 05:00 UTC (`0 5 * * 0`), plus manual dispatch.
+  - The schedule was added after the first dry run had been reviewed. 05:00 UTC comes after the nightly Skiddle (02:00), snapshot (03:00) and delete (04:00) jobs.
+  - Scheduled runs have no inputs, so they write. Manual runs keep `dry_run` defaulting to true.
+  - `test_workflow_guard.py` requires the triggers to be exactly `{schedule, workflow_dispatch}`. It also runs the step's script as a scheduled run would and checks that no `--dry-run` is passed.
   - It uses the `db-writes` concurrency group.
 - **Embeddings** for venues wait for stage 2.
 - **Diagnostic:** `python -m jobs.osm_venues --dry-run --diagnose`, or the workflow's `diagnose` input, which always adds `--dry-run`, prints facts about the connection and stops. It reports:

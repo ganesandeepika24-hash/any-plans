@@ -8,9 +8,16 @@ call it on a timer either.
 Skiddle: ingest-skiddle.yml runs nightly and by hand. Its triggers must be exactly
 {schedule, workflow_dispatch}, and the schedule is refused unless 0001 contains
 "Skiddle schedule: APPROVED", which is recorded with the approval email's conditions.
+
+OSM venues: ingest-osm-venues.yml runs weekly and by hand. Its triggers must be exactly
+{schedule, workflow_dispatch}, and a scheduled run, which has no inputs, must write.
+The ingest step's script is run with a stub `uv` to check that no --dry-run is passed.
 """
 
+import os
 import re
+import shutil
+import subprocess
 
 import pytest
 import yaml
@@ -117,12 +124,97 @@ def test_snapshot_workflow_is_scheduled_and_manual():
     assert "ticketmaster" not in workflow.read_text().lower()
 
 
-def test_osm_venues_workflow_is_manual_until_its_dry_run_is_reviewed():
-    # The Sunday 05:00 UTC schedule is added after the first dry run has been reviewed
-    # (decision 0009). Adding it means changing this test to {schedule, workflow_dispatch}.
-    workflow = WORKFLOWS / "ingest-osm-venues.yml"
-    assert triggers(workflow.read_text()) == {"workflow_dispatch"}
-    assert "ticketmaster" not in workflow.read_text().lower()
+OSM_WORKFLOW = WORKFLOWS / "ingest-osm-venues.yml"
+OSM_TRIGGERS = {"schedule", "workflow_dispatch"}
+OSM_STEP = "Ingest OSM venues"
+OSM_JOB = ["run", "python", "-m", "jobs.osm_venues"]
+EXPRESSION = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
+STUB_UV = '#!/bin/sh\nprintf "%s\\n" "$@"\n'
+
+
+def on_section(text: str) -> dict:
+    doc = yaml.safe_load(text) or {}
+    return doc.get("on", doc.get(True))
+
+
+def osm_ingest_args(workflow_text: str, inputs: dict[str, str], bin_dir) -> list[str]:
+    """Run the ingest step's script as GitHub would and return the job's arguments.
+
+    A scheduled run has an empty inputs context, so every ${{ inputs.* }} is "".
+    """
+    doc = yaml.safe_load(workflow_text)
+    (job,) = doc["jobs"].values()
+    step = next(s for s in job["steps"] if s.get("name") == OSM_STEP)
+    assert "if" not in job and "if" not in step, "the ingest step must not be skipped"
+
+    def render(value) -> str:
+        def expression(match: re.Match) -> str:
+            name = match.group(1)
+            if name.startswith("inputs."):
+                return inputs.get(name.removeprefix("inputs."), "")
+            if name.startswith("secrets."):
+                return "unused"
+            raise AssertionError(f"can't evaluate ${{{{ {name} }}}} in the ingest step")
+
+        return EXPRESSION.sub(expression, str(value))
+
+    uv = bin_dir / "uv"
+    uv.write_text(STUB_UV)
+    uv.chmod(0o755)
+    env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    env |= {k: render(v) for k, v in step.get("env", {}).items()}
+    bash = shutil.which("bash")
+    assert bash, "bash is needed to run the workflow step"
+    out = subprocess.run(  # noqa: S603 (our own committed workflow, not input)
+        [bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", render(step["run"])],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert out[: len(OSM_JOB)] == OSM_JOB
+    return out[len(OSM_JOB) :]
+
+
+def test_osm_venues_workflow_is_weekly_and_manual():
+    text = OSM_WORKFLOW.read_text()
+    assert triggers(text) == OSM_TRIGGERS
+    assert on_section(text)["schedule"] == [{"cron": "0 5 * * 0"}]
+    assert "ticketmaster" not in text.lower()
+
+
+def test_osm_venues_manual_inputs_are_unchanged():
+    inputs = on_section(OSM_WORKFLOW.read_text())["workflow_dispatch"]["inputs"]
+    assert {name: (i["type"], i["default"]) for name, i in inputs.items()} == {
+        "dry_run": ("boolean", True),
+        "diagnose": ("boolean", False),
+    }
+
+
+def test_osm_venues_scheduled_run_writes(tmp_path):
+    assert osm_ingest_args(OSM_WORKFLOW.read_text(), {}, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("inputs", "expected"),
+    [
+        ({"dry_run": "true", "diagnose": "false"}, ["--dry-run"]),
+        ({"dry_run": "false", "diagnose": "false"}, []),
+        ({"dry_run": "false", "diagnose": "true"}, ["--dry-run", "--diagnose"]),
+        ({"dry_run": "true", "diagnose": "true"}, ["--dry-run", "--diagnose"]),
+    ],
+    ids=["manual default", "manual write", "diagnose", "diagnose and dry run"],
+)
+def test_osm_venues_manual_runs_keep_their_flags(tmp_path, inputs, expected):
+    assert osm_ingest_args(OSM_WORKFLOW.read_text(), inputs, tmp_path) == expected
+
+
+def test_osm_scheduled_write_check_catches_a_dry_run_default(tmp_path):
+    text = OSM_WORKFLOW.read_text()
+    old = 'elif [ "$DRY_RUN" = "true" ]; then'
+    assert text.count(old) == 1
+    broken = text.replace(old, 'elif [ "$DRY_RUN" != "false" ]; then')
+    assert osm_ingest_args(broken, {}, tmp_path) == ["--dry-run"]
 
 
 def test_no_other_workflow_mentions_ticketmaster(not_cleared):
