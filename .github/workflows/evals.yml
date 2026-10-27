@@ -1,0 +1,74 @@
+name: Evals
+
+# Decision 0014: the parse-accuracy eval (evals/run_evals.py) against the real providers.
+# Manual only for now: each run spends up to 80 provider calls (principle 1). Running on
+# PRs and nightly is stage 3. "supabase" uses the live config and areas; "repo" uses the
+# prompt and models in the migrations and the seeded areas, to test a prompt before it is
+# applied.
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Where the prompt, models and areas come from
+        type: choice
+        options: [supabase, repo]
+        default: supabase
+      max_calls:
+        description: Provider calls allowed (1 to 80)
+        type: number
+        default: 80
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals
+  cancel-in-progress: false
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: agent/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run the eval
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CONFIG_VERSION: eval-${{ github.sha }}
+          CONFIG_SOURCE: ${{ inputs.config }}
+          MAX_CALLS: ${{ inputs.max_calls }}
+        run: |
+          uv run python ../evals/run_evals.py --config "$CONFIG_SOURCE" --max-calls "$MAX_CALLS" \
+            --out ../evals/results/latest.json | tee ../evals/results-summary.txt
+          { echo '```'; cat ../evals/results-summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: |
+            evals/results/latest.json
+            evals/results-summary.txt
+          if-no-files-found: warn
+          retention-days: 90

@@ -54,10 +54,10 @@ jobs:
         run: uv sync --frozen
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run ruff check . ../evals
 
       - name: Format check
-        run: uv run ruff format --check .
+        run: uv run ruff format --check . ../evals
 
       - name: Tests
         run: uv run pytest

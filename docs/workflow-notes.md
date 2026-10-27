@@ -2,6 +2,23 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.6, eval set and runner
+
+### Run results
+
+| Run | Config | End to end | Model only | Notes |
+|---|---|---|---|---|
+| Offline, perfect model (fake LLM returning the hand-written replies) | repo | 66.2% (47/71) | 100% (71/71) | The resolver ceiling: every failure is a known gap (0014) |
+| First live run | | pending | pending | |
+
+### What went wrong
+
+- **Tests that couldn't fail.** The first "wrong reply" tests edited the case's own expected reply, so the model-only score compared the reply with itself and passed. Caught when the tests failed in an unexpected way; the fake model now returns the wrong reply and the case keeps its own.
+- **Two scorer gaps found by deliberate breaks.** Dropping `include_unpriced` from the budget check, and comparing places by spelling ("South Bank" against "Southbank"), both passed the suite. Each now has a test.
+- **Lint config that didn't apply.** `evals/` had no ruff config, so ruff used its defaults (88 characters), not the agent's. Added `evals/ruff.toml`, which extends the agent's settings, and agent CI now lints `evals/`.
+- **A sed edit that hit two jobs.** Adding `../evals` to the agent's lint step also changed the jobs job's. Seen in the diff and reverted.
+- **Seed rows that disagree with later rules.** Rows 38, 39, 51, 59 and 60 follow the later docs or 0012, not the seed. Listed in 0014 for review.
+
 ## 2026-10-27: step 1.5, parser gaps
 
 - **Briefs that pointed at docs Claude Code can't read.** The seed queries and four rule docs live in claude.ai Project files, which aren't reachable from the codespace. Claude Code looked in the repo, the branches and the artifact list, then asked for them to be pasted rather than guess "the 30 queries".

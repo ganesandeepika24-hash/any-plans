@@ -1,0 +1,33 @@
+# Evals
+
+## Parse accuracy (`queries.jsonl`, `run_evals.py`)
+
+73 hand-written searches from the project docs (decision 0014), one per line:
+
+- `id`, `row` (the docs' row number), `uc` (use case, or null), `tag` (`synthetic`), `source` (the doc it comes from).
+- `query`, `now` (frozen at Tue 27 Oct 2026 12:00 London), `location` (a pin or the user's position, or null).
+- `skip`: why the row doesn't run (`needs_prior_filters` for the refine rows 25 and 26), or null.
+- `scored`: the fields scored for this row: `date`, `area`, `budget`, `category`, and `radius` only when the user states a distance.
+- `reply`: the `UnderstoodQuery` a good model should return. `also_accept`: changes to `reply` that are also right.
+- `expected`: what the product should do, written by hand from the docs, never by running the resolver:
+  - `status` and `missing`: the clarify reasons.
+  - `date`: a list of acceptable options, each `{window, missing}` (a window of two ISO times, or null for no date filter), or `{unsupported}` for something no filter can express yet.
+  - `area`: `{id}` (a seeded area), `{unseeded}` (a place the product should know but doesn't), `{point}` (the request's location), or null.
+  - `budget`: `price_min`, `price_max`, `include_unpriced`. `categories`. `radius_km` (only when stated).
+- `unscored`: who, vibe, actions, chips and plan checks from the docs: recorded, not scored.
+- `note`: why a row is the way it is, where it isn't obvious.
+
+Run it from `agent/`:
+
+```
+uv run python ../evals/run_evals.py --config repo     # prompt and models from the migrations
+uv run python ../evals/run_evals.py --config supabase # the live config
+```
+
+It needs the provider keys in the environment; without them every case rests. On GitHub, run the **Evals** workflow by hand: it uses the repo secrets and uploads the results. A run stops before passing 80 provider calls.
+
+`agent/tests/test_run_evals.py` checks the set and the scorer with a fake model, including which rows a perfect model still fails because of resolver gaps.
+
+## Understand cases (`understand/cases.jsonl`)
+
+The resolver's own cases: see `understand/README.md`.
