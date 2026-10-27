@@ -90,3 +90,21 @@ Q-02 itself (in the PRD) isn't in the repo, so the `queries` columns below are a
 - **Apply order:** tested locally in both orders. In Supabase's order, 002 after 011 prints the out-of-order notice and applies cleanly. In name order it applies second. The `000` probe still triggers its notice.
 - **Deliberate breaks:** 15 in the agent and 7 in migration 002, and all 22 fail the suite or the db checks.
 - **Supabase:** 002 isn't applied yet. Apply it with its checksum update (0006). `migrate.sh` will print the out-of-order notice, which is expected.
+
+## Changes
+
+- **2026-10-27: users can read their own `queries` rows (migration 012).**
+  - **Why:** the `/parse` smoke test (`agent/scripts/smoke_parse.py`) reads the row for its query with the user's token. Under 002 alone, only `service_role` could read `queries`, so that read could only fail. The other options were putting the service key on a laptop, which goes against CLAUDE.md, or a smoke test that can't check the row. The owner chose the policy.
+  - **What changed:**
+    - `grant select on queries to authenticated`.
+    - A policy, `queries_read_own`, matches `user_id` against the JWT `sub` in `request.jwt.claims`. That's the setting PostgREST fills in and `auth.uid()` reads. Reading it directly works in CI, which has no `auth` schema.
+    - With no claims, nothing matches. A `sub` that isn't a UUID is an error, which fails closed.
+  - **Unchanged:** writes stay with `service_role`, and `query_results` stays private. `anon` still has no access.
+  - **Trade-off:** a user can see their own rows in full, including the provider attempts and config versions. Neither is sensitive.
+- **The smoke test** reads four environment variables, never arguments or files:
+  - `AGENT_URL`
+  - `SUPABASE_URL`
+  - `SUPABASE_PUBLISHABLE_KEY` (allowed in the frontend)
+  - `SUPABASE_USER_TOKEN`
+
+  It refuses plain http except to localhost, never prints the token, and retries the row read for a few seconds, because the agent writes the row just after it replies. It has 23 tests against a local fake server. 7 deliberate breaks in the script and 4 in migration 012 all fail the suite or the db checks.

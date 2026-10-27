@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: /parse smoke test
+
+- **A brief that couldn't work as written, raised before coding.** It asked the script to read the `queries` row with the user's token, but 002 made `queries` service-role only. Asked the owner, who chose a read-own-rows policy (migration 012).
+- **`auth.uid()` doesn't exist in CI.** The policy reads `request.jwt.claims` directly, which is what `auth.uid()` does on Supabase.
+- **A bad `sub` errors rather than matching nothing.** A test found it. The migration comment now says so, because it fails closed.
+- **urllib changes header case** (`apikey` is sent as `Apikey`), so the test compared header names case-sensitively and failed. HTTP headers are case-insensitive, and the test now compares lowercased names.
+
 ## 2026-10-27: step 1.6, /parse route
 
 - **The previous step's network guard would have broken CI after a quiet week.** The guard added in 1.5 blocked every real request, including the embedding model download that the `slow` tests make when CI's model cache is cold. CI only passed because the cache was warm, and GitHub evicts caches unused for 7 days. Found when the tests ran here without a cache. Tests marked `slow` are now exempt.

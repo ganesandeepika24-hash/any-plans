@@ -139,6 +139,7 @@ The two orders must give the same result, so:
   - on Supabase it's applied after 011, so `migrate.sh` prints "002_logging.sql: NOTICE applying out of order, 011 is already applied", which is expected
   - CI's out-of-order probe moved from 002 to 000, so it can't collide with a real migration
   - 003 and 004 are still unwritten, and the rules above still apply to them
+- **012** (`012_queries_read_own.sql`, decision 0013): lets `authenticated` select its own `queries` rows, through the policy `queries_read_own`. It depends on 002.
 - `migrate.sh` applies any unrecorded file in name order, and prints a NOTICE for each file applied out of order. It never rejects a gap.
 
 ## Trade-offs
