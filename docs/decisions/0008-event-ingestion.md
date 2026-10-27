@@ -97,15 +97,15 @@ Step 1.1 fills the `events` table from Ticketmaster and Skiddle. The constraints
 - At the end it gets `duration_ms`, `fetched`, `new`, `updated`, `failed` and `deleted` (postponed and swept events, or the delete job's events plus orphaned Ticketmaster venues). A crashed run keeps `duration_ms` null.
 - Skipped items aren't stored: skipped = fetched − new − updated − failed. Their reasons are printed in the run summary.
 
-## Migration order (002 to 007)
+## Migration order (002 to 008)
 
-002 (logging), 003 (stage 3 metrics views) and 004 (watches) haven't been written yet. Migrations 005 (`job_runs.deleted`), 006 (`price_snapshots`) and 007 (`events.duplicate_of`, the `pub` venue kind, `venues.website_url`) reach Supabase first. So on Supabase, 002 to 004 will be applied after them, out of name order. A fresh database, including CI's, applies every migration in name order.
+002 (logging), 003 (stage 3 metrics views) and 004 (watches) haven't been written yet. Migrations 005 (`job_runs.deleted`), 006 (`price_snapshots`), 007 (`events.duplicate_of`, the `pub` venue kind, `venues.website_url`) and 008 (`job_runs.data_as_of`) reach Supabase first. So on Supabase, 002 to 004 will be applied after them, out of name order. A fresh database, including CI's, applies every migration in name order.
 
 The two orders must give the same result, so:
 - 002, 003 and 004 must not create or alter `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`.
 - 002, 003 and 004 must not replace the `events_public_read` policy or the `venues` kind CHECK. 007 replaces both on Supabase before 002 to 004 run there.
 - 003's views must not reference `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`. On a fresh database, 003 runs before 005 to 007, so a view that references them fails CI. If a view needs one of them, a later migration, numbered above every migration already on Supabase, adds or replaces the view.
-- 005, 006 and 007 depend only on 001 (and each on the ones before it), never on 002 to 004.
+- 005 to 008 depend only on 001 (and each on the ones before it), never on 002 to 004.
 - **007** (`007_duplicates_and_venue_fields.sql`, step 1.2b, decision 0009):
   - adds `events.duplicate_of` (`on delete set null`) with an index
   - drops and re-creates `events_public_read`, with `duplicate_of is null` added, in the same transaction
@@ -113,6 +113,12 @@ The two orders must give the same result, so:
   - adds `venues.website_url`
   - depends only on 001
   - step 1.2c (OSM venues) uses its venue changes
+- **008** (`008_job_runs_data_as_of.sql`, step 1.2c, decision 0009):
+  - adds `job_runs.data_as_of timestamptz`, the data's own as-of time, such as the OSM extract's replication timestamp
+  - depends only on `job_runs` (001)
+  - the build plan gives 002 to 004 no `job_runs` change (checked 27 Oct 2026); 003's job-success view reads `job_runs` but doesn't need `data_as_of`
+  - 002, 003 and 004 must not add or alter `job_runs.data_as_of`
+  - 003's views must not reference it, because on a fresh database 003 runs before 008
 - `migrate.sh` applies any unrecorded file in name order, and prints a NOTICE for each file applied out of order. It never rejects a gap.
 
 ## Trade-offs

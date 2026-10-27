@@ -6,8 +6,10 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastembed>=0.9.1",
     "httpx>=0.28.1",
+    "osmium>=4.0",
     "psycopg[binary]>=3.2",
     "pydantic>=2.14.1",
+    "shapely>=2.0",
     "tzdata>=2026.5",
 ]
 

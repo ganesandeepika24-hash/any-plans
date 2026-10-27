@@ -117,6 +117,14 @@ def test_snapshot_workflow_is_scheduled_and_manual():
     assert "ticketmaster" not in workflow.read_text().lower()
 
 
+def test_osm_venues_workflow_is_manual_until_its_dry_run_is_reviewed():
+    # The Sunday 05:00 UTC schedule is added after the first dry run has been reviewed
+    # (decision 0009). Adding it means changing this test to {schedule, workflow_dispatch}.
+    workflow = WORKFLOWS / "ingest-osm-venues.yml"
+    assert triggers(workflow.read_text()) == {"workflow_dispatch"}
+    assert "ticketmaster" not in workflow.read_text().lower()
+
+
 def test_no_other_workflow_mentions_ticketmaster(not_cleared):
     others = [
         p.name
