@@ -422,6 +422,41 @@ class Database:
             )
         self.conn.commit()  # visible even if the run crashes later
 
+    def diagnostics(self) -> dict[str, object]:
+        """Read-only facts about this connection: who it is, where it is, and what it can
+        see of venues and job_runs. Used by `jobs.osm_venues --dry-run --diagnose`."""
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                select current_database()                          as database,
+                       host(inet_server_addr())                    as server_addr,
+                       current_user, session_user,
+                       r.rolbypassrls, r.rolsuper,
+                       pg_get_userbyid(c.relowner)                 as venues_owner,
+                       pg_get_userbyid(c.relowner) = current_user  as owns_venues,
+                       c.relrowsecurity                            as venues_rls_enabled,
+                       c.relforcerowsecurity                       as venues_rls_forced,
+                       (select count(*) from public.venues where source = 'osm')
+                                                                   as stored_osm_venues,
+                       (select count(*) from public.job_runs)      as job_runs_visible,
+                       (select count(*) from public.job_runs where job = 'osm_venues')
+                                                                   as osm_job_runs_visible
+                  from pg_roles r, pg_class c
+                 where r.rolname = current_user and c.oid = 'public.venues'::regclass
+                """
+            )
+            report = dict(cur.fetchone())
+            cur.execute(
+                """
+                select id, started_at, duration_ms, data_as_of, fetched, new, updated, deleted
+                  from public.job_runs where job = 'osm_venues'
+                 order by started_at desc, id desc limit 5
+                """
+            )
+            report["recent_osm_job_runs"] = [dict(row) for row in cur.fetchall()]
+        self.conn.rollback()
+        return report
+
     def osm_venues(self) -> dict[str, tuple]:
         """Stored OSM venues: source_id -> (name, kind, address, booking_url, website_url,
         lat, lon), with coordinates rounded to OSM's 7 decimal places."""

@@ -2,6 +2,11 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: OSM venues diagnostic
+
+- **A test that couldn't see its own bug.** The diagnostic's owner test stored only OSM venues, so dropping the `source = 'osm'` filter from the count still passed. Found by a deliberate break; the test now adds a Skiddle venue as well.
+- **A weakness found while investigating.** The deletion floor treats "no stored venues visible" as a first run, so it gives no protection to a role restricted by RLS. Recorded in 0009 as open, with a proposed fix for a later PR.
+
 ## 2026-10-27: step 1.2c, OSM venues
 
 - **The brief's extract URL was wrong.** `/europe/great-britain/` returns 404; the extract lives under `/europe/united-kingdom/`. Caught by checking the URL before planning.

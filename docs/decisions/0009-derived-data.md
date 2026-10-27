@@ -178,6 +178,14 @@ The planner needs places as well as events: restaurants, bars, pubs, theatres, m
   - The weekly schedule (Sundays 05:00 UTC) is added after the first dry run has been reviewed.
   - It uses the `db-writes` concurrency group.
 - **Embeddings** for venues wait for stage 2.
+- **Diagnostic:** `python -m jobs.osm_venues --dry-run --diagnose`, or the workflow's `diagnose` input, which always adds `--dry-run`, prints facts about the connection and stops. It reports:
+  - `current_database()`, `inet_server_addr()`, `current_user` and `session_user`
+  - the role's `rolbypassrls` and `rolsuper`
+  - who owns `venues`, and whether its RLS is enabled or forced
+  - the OSM venue count the floor would see
+  - unfiltered and `osm_venues` counts of `job_runs`, with the last five `osm_venues` runs
+
+  It's read-only and downloads nothing. `--diagnose` without `--dry-run` is refused.
 - **ODbL:** the attribution, share-alike and no-merging rules in 0006.
 
 ### Trade-offs
@@ -187,6 +195,11 @@ The planner needs places as well as events: restaurants, bars, pubs, theatres, m
 - **Skipping multipolygons** drops some large venues, such as the British Museum and Shakespeare's Globe, until they're assembled.
 - **The 2-day freshness limit** leaves about half a day's margin if Geofabrik is late.
 - **The ODbL rules constrain future features.** Matching OSM venues to event venues needs a new decision first.
+- **The floor trusts what the connection can see (open).** With no stored venues visible, the floor treats the run as a first run and passes.
+  - A role that neither owns `venues` nor bypasses RLS sees none, so for that role the floor gives no protection.
+  - Deletes would also be filtered by RLS, and writes would fail, so no rows would actually be lost.
+  - The diagnostic shows which case applies on Supabase.
+  - Proposed follow-up: refuse deletions unless the connection owns `venues` or has `rolbypassrls`.
 
 ### Metrics and results
 

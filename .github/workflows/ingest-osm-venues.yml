@@ -11,6 +11,10 @@ on:
         description: Read the extract and count only. The database connection is read-only.
         type: boolean
         default: true
+      diagnose:
+        description: Print the connection's database, role, RLS status and visible counts, then stop. Always read-only; no download.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -42,7 +46,12 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           DRY_RUN: ${{ inputs.dry_run }}
+          DIAGNOSE: ${{ inputs.diagnose }}
         run: |
           args=()
-          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          if [ "$DIAGNOSE" = "true" ]; then
+            args+=(--dry-run --diagnose)  # never a writable connection
+          elif [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
           uv run python -m jobs.osm_venues "${args[@]}"

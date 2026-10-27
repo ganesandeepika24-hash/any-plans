@@ -1,6 +1,11 @@
 """OpenStreetMap venues from Geofabrik's Greater London extract (decision 0009).
 
 Usage: python -m jobs.osm_venues [--dry-run] [--file PATH]
+       python -m jobs.osm_venues --dry-run --diagnose
+
+--diagnose prints which database and role the job connects as, whether that role is
+restricted by RLS on venues, and the counts it can see. It reads nothing else, doesn't
+download the extract, and only runs with --dry-run (a read-only connection).
 
 The documented selection, as an Overpass query. The job reads the Geofabrik extract
 instead of calling Overpass, and applies the same rules itself:
@@ -353,7 +358,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m jobs.osm_venues")
     parser.add_argument("--dry-run", action="store_true", help="count only, write nothing")
     parser.add_argument("--file", type=Path, help="read this extract instead of downloading")
+    parser.add_argument(
+        "--diagnose", action="store_true", help="with --dry-run: print connection facts and exit"
+    )
     args = parser.parse_args(argv)
+    if args.diagnose and not args.dry_run:
+        print("--diagnose only runs with --dry-run", file=sys.stderr)
+        return 2
+
+    if args.diagnose:
+        db = Database.connect(config.from_env().db_url, read_only=True)
+        try:
+            report = db.diagnostics()
+        finally:
+            db.close()
+        print(json.dumps({"diagnose": report}, indent=2, default=str))
+        return 0
 
     db = Database.connect(config.from_env().db_url, read_only=args.dry_run)
     now = datetime.now(UTC).replace(microsecond=0)
