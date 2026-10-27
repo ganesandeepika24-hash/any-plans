@@ -24,6 +24,7 @@ from pathlib import Path
 
 import httpx
 import osmium
+import psycopg
 import pytest
 
 from jobs import osm_venues
@@ -388,3 +389,93 @@ def test_dry_run_counts_and_writes_nothing(db_url, db, sql):
 def test_a_dry_run_refuses_a_writable_connection(db):
     with pytest.raises(ValueError, match="read-only"):
         run(db, dry_run=True)
+
+
+# --diagnose (read-only, dry mode only) ---------------------------------------------
+
+
+def test_diagnose_without_dry_run_is_refused(monkeypatch, capsys):
+    connected = []
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://example")
+    monkeypatch.setattr(
+        osm_venues.Database,
+        "connect",
+        staticmethod(lambda url, read_only: connected.append(read_only)),
+    )
+    assert osm_venues.main(["--diagnose"]) == 2
+    assert connected == []
+    assert "only runs with --dry-run" in capsys.readouterr().err
+
+
+def test_diagnose_is_read_only_and_downloads_nothing(monkeypatch, capsys):
+    opened = []
+
+    class FakeDb:
+        def __init__(self, read_only):
+            self.read_only = read_only
+
+        def diagnostics(self):
+            return {"current_user": "postgres", "stored_osm_venues": 3}
+
+        def close(self):
+            pass
+
+    def connect(url, read_only):
+        opened.append(read_only)
+        return FakeDb(read_only)
+
+    def no_download(*args):
+        raise AssertionError("--diagnose must not download the extract")
+
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://example")
+    monkeypatch.setattr(osm_venues.Database, "connect", staticmethod(connect))
+    monkeypatch.setattr(osm_venues, "download", no_download)
+    assert osm_venues.main(["--dry-run", "--diagnose"]) == 0
+    assert opened == [True]
+    assert '"stored_osm_venues": 3' in capsys.readouterr().out
+
+
+def test_diagnostics_as_the_table_owner(db_url, db, sql):
+    run(db)  # 5 OSM venues and one osm_venues job_runs row
+    sql("insert into job_runs (job, city_id) values ('other_job', null)")
+    sql(
+        "insert into venues (city_id, source, source_id, name, kind)"
+        " values ('london', 'skiddle', 'sk-venue', 'Not from OSM', 'other')"
+    )
+    read_only = Database.connect(db_url, read_only=True)
+    try:
+        report = read_only.diagnostics()
+    finally:
+        read_only.close()
+    assert report["database"] == psycopg.conninfo.conninfo_to_dict(db_url)["dbname"]
+    assert "server_addr" in report
+    assert (report["current_user"], report["session_user"]) == ("postgres", "postgres")
+    assert (report["venues_owner"], report["owns_venues"]) == ("postgres", True)
+    assert (report["venues_rls_enabled"], report["venues_rls_forced"]) == (True, False)
+    assert report["stored_osm_venues"] == 5
+    assert (report["job_runs_visible"], report["osm_job_runs_visible"]) == (2, 1)
+    [recent] = report["recent_osm_job_runs"]
+    assert (recent["data_as_of"], recent["new"]) == (FRESH, 5)
+    assert sql("select count(*) from job_runs") == [(2,)]  # nothing written
+
+
+def test_a_role_restricted_by_rls_sees_no_venues(db_url, db):
+    """The floor weakness: a role that neither owns venues nor bypasses RLS sees zero
+    stored venues, so the floor would treat the run as a first run."""
+    run(db)
+    conn = psycopg.connect(db_url, autocommit=False)
+    try:
+        # All in one transaction that diagnostics() rolls back, role included.
+        conn.execute("create role diag_restricted nologin")
+        conn.execute("grant select on public.venues, public.job_runs to diag_restricted")
+        conn.execute("set role diag_restricted")
+        report = Database(conn).diagnostics()
+    finally:
+        conn.close()
+    assert report["current_user"] == "diag_restricted"
+    assert (report["rolbypassrls"], report["owns_venues"]) == (False, False)
+    assert (report["stored_osm_venues"], report["job_runs_visible"]) == (0, 0)
+    with psycopg.connect(db_url) as check:
+        assert check.execute(
+            "select count(*) from pg_roles where rolname = 'diag_restricted'"
+        ).fetchone() == (0,)
