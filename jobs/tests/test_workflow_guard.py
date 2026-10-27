@@ -15,6 +15,9 @@ The ingest step's script is run with a stub `uv` to check that no --dry-run is p
 
 Embed events: embed-events.yml is manual only (ingest embeds nightly), with dry_run
 defaulting to true.
+
+Keep alive: keepalive.yml runs every third day and by hand, so the free Supabase
+project never goes a week without database activity (decision 0011).
 """
 
 import os
@@ -230,6 +233,32 @@ def test_embed_events_workflow_is_manual_only():
     assert on_section(text)["workflow_dispatch"]["inputs"]["dry_run"]["default"] is True
     assert yaml.safe_load(text)["concurrency"]["group"] == "db-writes"
     assert "ticketmaster" not in text.lower()
+
+
+KEEPALIVE_WORKFLOW = WORKFLOWS / "keepalive.yml"
+
+
+def test_keepalive_runs_every_third_day_and_by_hand():
+    text = KEEPALIVE_WORKFLOW.read_text()
+    assert triggers(text) == {"schedule", "workflow_dispatch"}
+    assert on_section(text)["schedule"] == [{"cron": "0 6 */3 * *"}]
+    assert "python -m jobs.keepalive" in text
+    assert "ticketmaster" not in text.lower()
+
+
+def test_keepalive_schedule_never_leaves_a_week_without_a_ping():
+    # Day-of-month */3 fires on days 1, 4, ... and restarts each month. Walk two years,
+    # leap day included, and check the longest gap stays under Supabase's 7 days.
+    from datetime import date, timedelta
+
+    day, last, longest = date(2027, 1, 1), None, 0
+    while day < date(2029, 1, 1):
+        if (day.day - 1) % 3 == 0:
+            if last:
+                longest = max(longest, (day - last).days)
+            last = day
+        day += timedelta(days=1)
+    assert longest == 3
 
 
 def test_no_other_workflow_mentions_ticketmaster(not_cleared):

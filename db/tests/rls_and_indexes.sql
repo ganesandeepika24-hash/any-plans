@@ -231,6 +231,10 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '009' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 009';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '010' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 010';
+  end if;
 end $$;
 
 -- Migration 005: job_runs.deleted.
@@ -404,6 +408,55 @@ begin
      or has_column_privilege('authenticated', 'public.events', 'description', 'update') then
     raise exception 'anon or authenticated can update events.embedding_hash or description';
   end if;
+end $$;
+
+-- Migration 010: search_items and its weights.
+do $$
+declare
+  fn constant regprocedure := 'public.search_items(jsonb, extensions.vector)'::regprocedure;
+begin
+  if (select provolatile from pg_proc where oid = fn) <> 's' then
+    raise exception 'search_items is not stable, so it could write';
+  end if;
+
+  if (select prosecdef from pg_proc where oid = fn) then
+    raise exception 'search_items must not be security definer';
+  end if;
+
+  if (select proconfig from pg_proc where oid = fn) is distinct from array['search_path=""'] then
+    raise exception 'search_items must set search_path to empty';
+  end if;
+
+  if has_function_privilege('anon', fn, 'execute')
+     or has_function_privilege('authenticated', fn, 'execute') then
+    raise exception 'anon or authenticated can execute search_items';
+  end if;
+
+  if exists (select 1 from pg_proc, aclexplode(proacl) a
+              where oid = fn and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+    raise exception 'public can execute search_items';
+  end if;
+
+  if not has_function_privilege('service_role', fn, 'execute') then
+    raise exception 'service_role cannot execute search_items';
+  end if;
+
+  if (select value_json from public.config where key = 'search_weights' and is_active)
+     is distinct from '{"similarity": 0.6, "distance": 0.25, "date": 0.15, "date_scale_days": 7}'::jsonb then
+    raise exception 'search_weights version 1 is missing, inactive or not the starting weights';
+  end if;
+end $$;
+
+-- anon can't call search_items even directly.
+do $$
+begin
+  set local role anon;
+  begin
+    perform public.search_items('{}');
+    raise exception 'anon called search_items';
+  exception when insufficient_privilege then null;
+  end;
+  reset role;
 end $$;
 
 rollback;

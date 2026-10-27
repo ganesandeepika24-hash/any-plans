@@ -2,6 +2,14 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.3, search function and keep-alive
+
+- **Said a branch existed when it didn't.** The step 1.3 plan said `feat/search-function` had been created, but the command was never run. Noticed when starting the code.
+- **A test fixture on the exact boundary.** The visibility test's "no end time" event started exactly 4 hours ago, so changing the policy's 3-hour fallback to 4 hours still passed, because `>` excluded it either way. Found by a deliberate break. The event now starts 3.5 hours ago.
+- **A local helper that hid a real result.** My script that rebuilds the local test database stopped `bootstrap.sql` at "role already exists", which skipped the schema grants. That added two false failures to every break run, which masked the missed break above until a clean baseline run was checked. CI wasn't affected: it bootstraps a new container.
+- **A slow test-data generator.** The first performance script made one random vector per row and linked duplicates through a join on a computed key, which took 76 s. A pool of 1,000 vectors and an indexed lookup brought it to about 20 s.
+- **A wrong row count caught by its own check.** Some generated "ended" events were multi-day events still running, so 20,039 were visible instead of 20,000. The script checks the count before timing anything.
+
 ## 2026-10-27: step 1.2d, event embeddings
 
 - **A CHECK that rejected every ordinary row.** `embedding_hash ~ '^[0-9a-f]{64}$' and embedding is not null` is false, not null, when both columns are null, so no event could be inserted. Caught by the db checks on a local container before commit. Fixed with `embedding_hash is null or (…)`.

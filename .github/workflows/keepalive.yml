@@ -1,0 +1,41 @@
+name: Keep alive
+
+# Decision 0011: free Supabase projects pause after a week without database activity.
+# Every third day at 06:00 UTC (days 1, 4, ... 31 of each month, so never more than 3
+# days apart), clear of the nightly jobs. Records a job_runs row and counts visible
+# events: real queries, not just a connection.
+on:
+  schedule:
+    - cron: "0 6 */3 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-writes
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: jobs
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: jobs/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Ping Supabase
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: uv run python -m jobs.keepalive

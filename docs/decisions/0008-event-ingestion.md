@@ -104,8 +104,9 @@ Step 1.1 fills the `events` table from Ticketmaster and Skiddle. The constraints
 The two orders must give the same result, so:
 - 002, 003 and 004 must not create or alter `job_runs.deleted`, `price_snapshots`, `events.duplicate_of`, `venues.website_url`, `events.description` or `events.embedding_hash`.
 - 002, 003 and 004 must not replace the `events_public_read` policy or the `venues` kind CHECK. 007 replaces both on Supabase before 002 to 004 run there.
+- 002, 003 and 004 must not create or replace `search_items` or the `search_weights` config key (010). Any later change to `events_public_read` must change `search_items` in the same migration (decision 0010).
 - 003's views must not reference `job_runs.deleted`, `price_snapshots`, `events.duplicate_of` or `venues.website_url`. On a fresh database, 003 runs before 005 to 007, so a view that references them fails CI. If a view needs one of them, a later migration, numbered above every migration already on Supabase, adds or replaces the view.
-- 005 to 009 depend only on 001 (and each on the ones before it), never on 002 to 004.
+- 005 to 010 depend only on 001 (and each on the ones before it), never on 002 to 004.
 - **007** (`007_duplicates_and_venue_fields.sql`, step 1.2b, decision 0009):
   - adds `events.duplicate_of` (`on delete set null`) with an index
   - drops and re-creates `events_public_read`, with `duplicate_of is null` added, in the same transaction
@@ -123,6 +124,10 @@ The two orders must give the same result, so:
   - adds `events.description` (at most 1,000 characters) and `events.embedding_hash` (sha256 hex, only alongside a vector)
   - depends only on 001
   - 002, 003 and 004 must not add or alter either column, and 003's views must not reference them
+- **010** (`010_search_items.sql`, step 1.3, decision 0010):
+  - adds `public.search_items(jsonb, extensions.vector)`, which only `service_role` may execute
+  - adds config key `search_weights`, version 1, active
+  - depends on 001, 007 and 009
 - `migrate.sh` applies any unrecorded file in name order, and prints a NOTICE for each file applied out of order. It never rejects a gap.
 
 ## Trade-offs
