@@ -239,6 +239,10 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '011' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 011';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '002' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 002';
+  end if;
 end $$;
 
 -- Migration 005: job_runs.deleted.
@@ -490,6 +494,63 @@ begin
   if (select value_json->'providers'->0->>'provider' from public.config
        where key = 'llm_understand' and is_active) is distinct from 'groq' then
     raise exception 'llm_understand should try groq first';
+  end if;
+end $$;
+
+-- Migration 002: queries and query_results.
+do $$
+declare
+  tbl text;
+  r text;
+  q uuid := gen_random_uuid();
+begin
+  foreach tbl in array array['public.queries', 'public.query_results'] loop
+    if not (select relrowsecurity from pg_class where oid = tbl::regclass) then
+      raise exception '% has RLS off', tbl;
+    end if;
+    foreach r in array array['anon', 'authenticated'] loop
+      if has_table_privilege(r, tbl, 'select') or has_table_privilege(r, tbl, 'insert')
+         or has_table_privilege(r, tbl, 'update') or has_table_privilege(r, tbl, 'delete') then
+        raise exception '% has rights on %', r, tbl;
+      end if;
+    end loop;
+    if not (has_table_privilege('service_role', tbl, 'select')
+            and has_table_privilege('service_role', tbl, 'insert')) then
+      raise exception 'service_role cannot read and write %', tbl;
+    end if;
+  end loop;
+
+  if exists (select 1 from pg_constraint
+              where conrelid = 'public.query_results'::regclass and contype = 'f'
+                and confrelid = 'public.events'::regclass) then
+    raise exception 'query_results must not reference events (decision 0007)';
+  end if;
+
+  if not exists (select 1 from pg_constraint
+                  where conrelid = 'public.query_results'::regclass and contype = 'f'
+                    and confrelid = 'public.queries'::regclass and confdeltype = 'c') then
+    raise exception 'query_results.query_id does not cascade from queries';
+  end if;
+
+  if (select value_json from public.config where key = 'ai_search_cap' and is_active)
+     is distinct from '{"per_user_per_day": 10}'::jsonb then
+    raise exception 'ai_search_cap version 1 is missing, inactive or not 10 a day';
+  end if;
+
+  -- An ok row needs filters; a resting one has none.
+  begin
+    insert into public.queries (id, user_id, city_id, route, query_text, status)
+    values (gen_random_uuid(), gen_random_uuid(), 'london', 'parse', 'jazz', 'ok');
+    raise exception 'queries accepted an ok row without filters';
+  exception when check_violation then null;
+  end;
+
+  insert into public.queries (id, user_id, city_id, route, query_text, status, filters, trace_id)
+  values (q, gen_random_uuid(), 'london', 'parse', 'jazz', 'ok', '{}', repeat('a', 32));
+  insert into public.query_results (query_id, rank, source, source_id) values (q, 1, 'skiddle', '1');
+  delete from public.queries where id = q;
+  if exists (select 1 from public.query_results where query_id = q) then
+    raise exception 'deleting a query left its results behind';
   end if;
 end $$;
 

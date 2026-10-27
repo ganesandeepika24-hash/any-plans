@@ -20,6 +20,7 @@ class PlanState(TypedDict, total=False):
     query_text: str | None  # what Retrieve embeds
     notes: list[dict[str, str]]
     message: str | None
+    trace_id: str | None  # the Langfuse trace
 
 
 def build_graph(understander: Understander) -> CompiledStateGraph:
@@ -31,6 +32,7 @@ def build_graph(understander: Understander) -> CompiledStateGraph:
             "query_text": result.query_text,
             "notes": [asdict(n) for n in result.notes],
             "message": result.message,
+            "trace_id": result.trace_id,
         }
 
     graph = StateGraph(PlanState)

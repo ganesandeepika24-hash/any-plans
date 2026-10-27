@@ -2,6 +2,15 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-27: step 1.6, /parse route
+
+- **The previous step's network guard would have broken CI after a quiet week.** The guard added in 1.5 blocked every real request, including the embedding model download that the `slow` tests make when CI's model cache is cold. CI only passed because the cache was warm, and GitHub evicts caches unused for 7 days. Found when the tests ran here without a cache. Tests marked `slow` are now exempt.
+- **A CI collision caught in planning.** The out-of-order probe in `ci.yml` used the number 002, so a real 002 would have failed the db job. The probe now uses 000.
+- **A config value that coerced.** `CapConfig` accepted the string `"10"` as 10. A test caught it, and the model is now strict.
+- **A test gap found before the breaks.** Every cap test used a UTC clock, so a London-midnight day boundary would have passed. Added a summer-time case (00:30 BST is still the previous day in UTC), and the "local day" break now fails it.
+- **Two test-harness slips:** moving 002 aside under a different filename made `migrate.sh` reject it, and a stopped container from an interrupted session blocked `docker run`. Neither was a code problem.
+- **An interrupted session.** The work survived on disk. It was checked with `git status` and a full test run before continuing.
+
 ## 2026-10-27: step 1.5, Understand node
 
 - **A contradiction in the brief, raised before coding.** It asked for the model's JSON to be validated against `SearchFilters`, whose keys are absolute times and coordinates, while principle 5 gives that work to code. Settled with two models, with approval.

@@ -148,17 +148,18 @@ jobs:
       - name: search_items p95 under 500 ms
         run: $PSQL -X -v ON_ERROR_STOP=1 -f - < db/tests/search_perf.sql
 
-      # Last database step: it records a probe migration 002 in the CI database.
+      # Last database step: it records a probe migration 000 in the CI database.
       - name: Out-of-order apply prints a notice
         run: |
           probe=$(mktemp -d)
           cp -r db "$probe/"
-          printf '%s\n' "insert into public.schema_migrations (version, filename) values ('002', '002_ci_probe.sql');" \
-            > "$probe/db/migrations/002_ci_probe.sql"
+          # 000 can never be a real migration, and it's always below the latest one.
+          printf '%s\n' "insert into public.schema_migrations (version, filename) values ('000', '000_ci_probe.sql');" \
+            > "$probe/db/migrations/000_ci_probe.sql"
           out=$("$probe/db/ci/migrate.sh")
           echo "$out"
           latest=$(ls db/migrations/*.sql | sed -E 's|.*/([0-9]+)_.*|\1|' | sort | tail -n 1)
-          echo "$out" | grep -q "002_ci_probe.sql: NOTICE applying out of order, $latest is already applied"
+          echo "$out" | grep -q "000_ci_probe.sql: NOTICE applying out of order, $latest is already applied"
 
       - name: Applied migrations are unchanged
         if: github.event_name == 'pull_request'

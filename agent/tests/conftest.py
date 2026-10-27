@@ -16,9 +16,14 @@ def _fresh_settings():
 
 
 @pytest.fixture(autouse=True)
-def no_network(monkeypatch):
+def no_network(request, monkeypatch):
     """No test may reach a real host: LLM providers, Langfuse and Supabase are faked with
-    httpx.MockTransport or test doubles. A real request fails the test."""
+    httpx.MockTransport or test doubles. A real request fails the test.
+
+    Tests marked slow are exempt: they fetch the embedding model from Hugging Face when
+    CI's model cache is cold, and they call no LLM, Langfuse or Supabase."""
+    if request.node.get_closest_marker("slow"):
+        return
 
     async def refuse_async(self, request):
         raise RuntimeError(f"network disabled in tests: {request.url.host}")

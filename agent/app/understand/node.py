@@ -60,6 +60,7 @@ class UnderstandResult:
     attempts: list[Attempt] = field(default_factory=list)
     config_versions: dict[str, int] = field(default_factory=dict)
     message: str | None = None
+    trace_id: str | None = None  # the Langfuse trace, for queries.trace_id
 
 
 def parse_reply(text: str) -> UnderstoodQuery:
@@ -100,6 +101,7 @@ class Understander:
             raise ValueError(f"query must be 1 to {MAX_QUERY_CHARS} characters")
         trace = self._tracer.start("understand", {"query": query})
         result = await self._run(query, trace)
+        result.trace_id = trace.trace_id
         trace.finish(
             output={
                 "status": result.status,
