@@ -133,6 +133,12 @@ The two orders must give the same result, so:
   - adds config keys `llm_understand` and `understand_prompt`, version 1, active
   - depends only on 001
   - 002, 003 and 004 must not replace the function or those config keys
+- **002** (`002_logging.sql`, step 1.6, decision 0013), written after 005 to 011:
+  - adds `queries`, `query_results` and config key `ai_search_cap`
+  - depends only on 001, and touches nothing that 005 to 011 create
+  - on Supabase it's applied after 011, so `migrate.sh` prints "002_logging.sql: NOTICE applying out of order, 011 is already applied", which is expected
+  - CI's out-of-order probe moved from 002 to 000, so it can't collide with a real migration
+  - 003 and 004 are still unwritten, and the rules above still apply to them
 - `migrate.sh` applies any unrecorded file in name order, and prints a NOTICE for each file applied out of order. It never rejects a gap.
 
 ## Trade-offs
