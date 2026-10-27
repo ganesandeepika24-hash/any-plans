@@ -112,8 +112,9 @@ def test_the_snapshot_dry_run_flag_opens_a_read_only_connection(monkeypatch):
 
 
 @pytest.mark.parametrize("dry_run", [True, False])
-def test_ingest_runs_dedupe_afterwards_in_the_same_mode(monkeypatch, dry_run):
-    """A dry ingest gets a dry, read-only dedupe, so it can't write links."""
+def test_ingest_runs_dedupe_then_embedding_in_the_same_mode(monkeypatch, dry_run):
+    """A dry ingest gets a dry, read-only dedupe and embedding run, so neither can write.
+    Embedding comes after dedupe, so newly linked duplicates aren't embedded."""
     calls = []
 
     class FakeDb:
@@ -136,15 +137,21 @@ def test_ingest_runs_dedupe_afterwards_in_the_same_mode(monkeypatch, dry_run):
         calls.append(("dedupe", dry_run, db.read_only))
         return ingest.dedupe.Summary(dry_run=dry_run)
 
+    def fake_embed(db, now, dry_run):
+        calls.append(("embed", dry_run, db.read_only))
+        return ingest.embed_events.Summary(dry_run=dry_run, counts=ingest.RunCounts())
+
     monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://example")
     monkeypatch.setenv("SKIDDLE_KEY", "KEY")
     monkeypatch.setattr(ingest.Database, "connect", staticmethod(connect))
     monkeypatch.setattr(ingest, "run", fake_run)
     monkeypatch.setattr(ingest.dedupe, "run", fake_dedupe)
+    monkeypatch.setattr(ingest.embed_events, "run", fake_embed)
     ingest.main(["skiddle", "--dry-run"] if dry_run else ["skiddle"])
     assert calls == [
         ("connect", dry_run),
         ("ingest", dry_run),
         ("dedupe", dry_run, dry_run),
+        ("embed", dry_run, dry_run),
         "close",
     ]

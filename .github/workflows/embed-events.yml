@@ -1,0 +1,55 @@
+name: Embed events
+
+# Decision 0009 (step 1.2d): embed new and changed event text. Ingest already runs this
+# after dedupe every night, so this workflow is manual only, for a dry run or a
+# backfill; jobs/tests/test_workflow_guard.py fails CI if it gets any other trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Count what would be embedded. The database connection is read-only, and the model isn't loaded.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-writes
+  cancel-in-progress: false
+
+jobs:
+  embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: jobs
+    env:
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.fastembed
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: jobs/uv.lock
+
+      - name: Cache embedding model
+        uses: actions/cache@v6
+        with:
+          path: .fastembed
+          key: fastembed-all-MiniLM-L6-v2
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Embed events
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          uv run python -m jobs.embed_events "${args[@]}"

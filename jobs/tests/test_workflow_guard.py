@@ -12,6 +12,9 @@ Skiddle: ingest-skiddle.yml runs nightly and by hand. Its triggers must be exact
 OSM venues: ingest-osm-venues.yml runs weekly and by hand. Its triggers must be exactly
 {schedule, workflow_dispatch}, and a scheduled run, which has no inputs, must write.
 The ingest step's script is run with a stub `uv` to check that no --dry-run is passed.
+
+Embed events: embed-events.yml is manual only (ingest embeds nightly), with dry_run
+defaulting to true.
 """
 
 import os
@@ -215,6 +218,18 @@ def test_osm_scheduled_write_check_catches_a_dry_run_default(tmp_path):
     assert text.count(old) == 1
     broken = text.replace(old, 'elif [ "$DRY_RUN" != "false" ]; then')
     assert osm_ingest_args(broken, {}, tmp_path) == ["--dry-run"]
+
+
+EMBED_WORKFLOW = WORKFLOWS / "embed-events.yml"
+
+
+def test_embed_events_workflow_is_manual_only():
+    # Ingest runs the embedding step after dedupe every night (decision 0009).
+    text = EMBED_WORKFLOW.read_text()
+    assert guard_failures(text) == []
+    assert on_section(text)["workflow_dispatch"]["inputs"]["dry_run"]["default"] is True
+    assert yaml.safe_load(text)["concurrency"]["group"] == "db-writes"
+    assert "ticketmaster" not in text.lower()
 
 
 def test_no_other_workflow_mentions_ticketmaster(not_cleared):

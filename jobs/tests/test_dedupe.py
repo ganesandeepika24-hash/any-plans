@@ -475,7 +475,6 @@ def ingest_page(db, source, page):
         "KEY",
         now=NOW,
         dry_run=False,
-        embedder=lambda texts: [[0.1] * 384 for _ in texts],
         sleep=lambda s: None,
     )
 

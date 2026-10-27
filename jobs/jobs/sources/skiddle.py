@@ -2,6 +2,10 @@
 
 Skiddle is approved for non-commercial use (decision 0001). It publishes no rate
 limit, so requests are kept to one a second.
+
+Descriptions aren't mapped. Skiddle's Events API docs (wiki revision 3664cd1) document
+only a `description` request flag that adds "artist and genre information", and name
+no response field for event text, so Event.description stays None (decision 0009).
 """
 
 import re

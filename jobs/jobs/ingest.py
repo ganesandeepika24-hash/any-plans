@@ -4,6 +4,8 @@ Usage: python -m jobs.ingest {ticketmaster|skiddle} [--dry-run] [--save-sample D
 
 A dry run fetches and maps everything but writes nothing. Its connection is
 read-only, so any write fails in Postgres, not just in this code.
+
+After the run, main() runs dedupe and then embed_events in the same mode.
 """
 
 import argparse
@@ -21,9 +23,8 @@ import httpx
 import psycopg
 from pydantic import ValidationError
 
-from jobs import config, dedupe
+from jobs import config, dedupe, embed_events
 from jobs.db import Database, RunCounts
-from jobs.embeddings import embed
 from jobs.geo import haversine_km
 from jobs.http import CallBudget, RateLimitedClient
 from jobs.normalise import Event, Skipped
@@ -32,7 +33,6 @@ from jobs.windows import HORIZON, initial_windows
 
 CITY_ID = "london"
 RADIUS_KM = 25.0
-EMBED_BATCH = 256
 
 
 @dataclass
@@ -53,7 +53,6 @@ class Summary:
     # Each window's total and result count; Skiddle windows also list their pages.
     windows: list[dict[str, Any]] = field(default_factory=list)
     swept: bool = False
-    embedded: int = 0
 
 
 def run(
@@ -63,7 +62,6 @@ def run(
     api_key: str,
     now: datetime,
     dry_run: bool,
-    embedder: Callable[[list[str]], list[list[float]]] = embed,
     on_page: Callable[..., None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Summary:
@@ -97,7 +95,6 @@ def run(
 
         if not dry_run:
             _write(db, source, city.id, events, postponed, now, summary)
-            summary.embedded = _embed_missing(db, embedder)
         finished = True
         return summary
     except BaseException:
@@ -169,17 +166,6 @@ def _write(db, source, city_id, events, postponed, now, summary) -> None:
             summary.swept = True
 
 
-def _embed_missing(db: Database, embedder) -> int:
-    done = 0
-    while rows := db.events_missing_embedding(EMBED_BATCH):
-        vectors = embedder([text for _, text in rows])
-        with db.conn.transaction():
-            for (event_id, _), vector in zip(rows, vectors, strict=True):
-                db.set_embedding(event_id, vector)
-        done += len(rows)
-    return done
-
-
 def _sample_writer(directory: Path) -> Callable[..., None]:
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -233,6 +219,10 @@ def main(argv: list[str] | None = None) -> int:
         # sees only what is already stored (the dry ingest wrote nothing).
         links = dedupe.run(db, now, dry_run=args.dry_run)
         print(json.dumps({"dedupe": asdict(links)}, indent=2, default=str))
+        # After dedupe, so new duplicates are skipped. A dry run counts and never loads
+        # the model.
+        embedded = embed_events.run(db, now, dry_run=args.dry_run)
+        print(json.dumps({"embed_events": asdict(embedded)}, indent=2, default=str))
     finally:
         db.close()
 

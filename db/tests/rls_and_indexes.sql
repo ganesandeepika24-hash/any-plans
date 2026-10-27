@@ -227,6 +227,10 @@ begin
   if not exists (select 1 from public.schema_migrations where version = '008' and checksum ~ '^[0-9a-f]{64}$') then
     raise exception 'schema_migrations has no checksum for 008';
   end if;
+
+  if not exists (select 1 from public.schema_migrations where version = '009' and checksum ~ '^[0-9a-f]{64}$') then
+    raise exception 'schema_migrations has no checksum for 009';
+  end if;
 end $$;
 
 -- Migration 005: job_runs.deleted.
@@ -350,6 +354,55 @@ begin
   if has_column_privilege('anon', 'public.job_runs', 'data_as_of', 'select')
      or has_column_privilege('authenticated', 'public.job_runs', 'data_as_of', 'select') then
     raise exception 'job_runs.data_as_of is readable by anon or authenticated';
+  end if;
+end $$;
+
+-- Migration 009: events.description and events.embedding_hash.
+do $$
+declare
+  vec text := '[' || array_to_string(array_fill(0.1::float8, array[384]), ',') || ']';
+  hash text := repeat('a', 64);
+begin
+  if (select string_agg(column_name || ':' || data_type, ',' order by column_name)
+        from information_schema.columns
+       where table_schema = 'public' and table_name = 'events'
+         and column_name in ('description', 'embedding_hash'))
+     is distinct from 'description:text,embedding_hash:text' then
+    raise exception 'events.description or events.embedding_hash is missing or not text';
+  end if;
+
+  -- Accepted: a hash with its vector, and a description at the cap.
+  insert into public.events (city_id, source, source_id, title, category, start_at,
+                             description, embedding, embedding_hash)
+  values ('london', 'test-009', 'ok', 'OK', 'Music', now() + interval '1 day',
+          repeat('x', 1000), vec::extensions.vector, hash);
+
+  begin
+    insert into public.events (city_id, source, source_id, title, category, start_at, embedding_hash)
+    values ('london', 'test-009', 'hash-only', 'Hash only', 'Music', now(), hash);
+    raise exception 'events accepted an embedding_hash without an embedding';
+  exception when check_violation then null;
+  end;
+
+  begin
+    insert into public.events (city_id, source, source_id, title, category, start_at,
+                               embedding, embedding_hash)
+    values ('london', 'test-009', 'bad-hash', 'Bad hash', 'Music', now(),
+            vec::extensions.vector, 'not-a-sha256');
+    raise exception 'events accepted an embedding_hash that is not 64 hex characters';
+  exception when check_violation then null;
+  end;
+
+  begin
+    insert into public.events (city_id, source, source_id, title, category, start_at, description)
+    values ('london', 'test-009', 'long', 'Long', 'Music', now(), repeat('x', 1001));
+    raise exception 'events accepted a description over 1000 characters';
+  exception when check_violation then null;
+  end;
+
+  if has_column_privilege('anon', 'public.events', 'embedding_hash', 'update')
+     or has_column_privilege('authenticated', 'public.events', 'description', 'update') then
+    raise exception 'anon or authenticated can update events.embedding_hash or description';
   end if;
 end $$;
 

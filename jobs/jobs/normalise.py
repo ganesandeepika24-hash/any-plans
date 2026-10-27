@@ -4,6 +4,8 @@ Sources parse their own payloads into these models. Anything a source can't map
 becomes a Skipped with a reason, so the run can count it.
 """
 
+import html
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -19,6 +21,10 @@ Category = Literal[
 # Same rule as the events_public_read policy (001) and the retention job (0007):
 # an event with no end time counts as ended three hours after it starts.
 FALLBACK_DURATION = timedelta(hours=3)
+
+# The events_description_length_check limit (migration 009).
+DESCRIPTION_LIMIT = 1000
+_TAG = re.compile(r"<[^>]*>")
 
 
 class Venue(BaseModel):
@@ -47,6 +53,7 @@ class Event(BaseModel):
     lon: float | None = None
     status: Literal["active", "cancelled"] = "active"
     venue: Venue | None = None
+    description: str | None = None
 
     @field_validator("start_at", "end_at")
     @classmethod
@@ -78,6 +85,18 @@ class Skipped:
     reason: str
     source_id: str | None = None
     delete: bool = False  # True when an existing row must also go (postponed events)
+
+
+def clean_description(value: str | None) -> str | None:
+    """Plain text from a source description: tags dropped, entities decoded, whitespace
+    collapsed, cut at a word boundary to fit DESCRIPTION_LIMIT. None if nothing's left."""
+    if not value:
+        return None
+    text = " ".join(html.unescape(_TAG.sub(" ", value)).split())
+    if len(text) > DESCRIPTION_LIMIT:
+        cut = text[: DESCRIPTION_LIMIT + 1].rsplit(" ", 1)[0]
+        text = cut if 0 < len(cut) <= DESCRIPTION_LIMIT else text[:DESCRIPTION_LIMIT]
+    return text or None
 
 
 def local_start(day: date, clock: time | None, tz: ZoneInfo) -> datetime:
