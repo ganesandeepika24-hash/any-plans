@@ -17,6 +17,7 @@ Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 |---|---|---|---|---|
 | Offline, perfect model (fake LLM returning the hand-written replies) | repo | 66.2% (47/71) | 100% (71/71) | The resolver ceiling: every failure is a known gap (0014) |
 | First live run (27 Oct, run 40600304576) | supabase | 39.2% (20/51) | 51.0% (26/51) | Not a baseline: 20 cases never ran (call cap), and 4 rested. See 0014, round 2 |
+| Paced rerun, the baseline (28 Oct, run 40612306072) | repo (llm v2) | 43.7% (31/71) | 57.8% (41/71) | All 71 ran on Groq, 0 fallbacks, 126,676 tokens |
 
 ### What went wrong
 

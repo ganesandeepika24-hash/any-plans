@@ -144,4 +144,12 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
   - fallbacks not counted
   - the limit at 8,000
   - 014 leaving v1 active (db test)
-- Paced rerun (`--config repo`, so `llm_understand` v2): pending.
+- **Baseline, the paced rerun** (28 Oct 2026, run 40612306072, `--config repo`: `llm_understand` v2, `understand_prompt` v2): **end to end 43.7% (31/71), model only 57.8% (41/71).**
+  - All 71 cases ran: no provider failures, no 429s and no fallbacks.
+  - It used 71 calls and 126,676 Groq tokens (about 1,800 a call, 63% of the daily limit), and waited 1,262 s for the pace.
+  - Per field, end to end: date 49/71, area 53/69, budget 68/69, category 52/69, radius 2/2.
+  - Per field, model only: date 55/71, area 66/69, budget 68/69, category 52/69, radius 2/2.
+  - Cloudflare was never called, so v2's 2,048 tokens are untested live.
+  - Model errors not covered by round 2's rules, for the later prompt work:
+    - It asks a category for "Things to do in Soho" (r64), "Just surprise me" (r73) and a pin search (r23). The prompt says not to.
+    - It asks a date for Boxing Day (r41), New Year's Eve (r43) and "Friday 6 November" (r67).
