@@ -2,6 +2,12 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: near me (decision 0017)
+
+- **I waited on a PR that had already merged.** I told the owner #21 was waiting for approval, but they had merged it. Check `gh pr view` or `origin/main` before saying a PR is open.
+- **The deploy order was at risk.** Render auto-deploys `agent/` on every commit to `main` (0004), so merging #21 probably shipped an agent that needs migration 016 before 016 was applied. Without it, every model call is refused and searches fall back to filters. The PR said to apply 016 first, but merging is what deploys. Raised with the owner straight away. Future PRs with a migration the agent depends on should say "apply before merging", not "before deploying".
+- **Two eval rows would have contradicted each other.** Giving row 61 a device location made it row 63's input with a different expected answer. Caught by reading both rows before changing either. The owner chose to make 63 the pin case.
+
 ## 2026-10-28: stage 1 step 1, search route and counters
 
 - **The spec's GET would have put the location in URLs.** "GET /search" and "don't log the user's location" conflict, because access logs record URLs. Raised before coding, and the owner chose POST.

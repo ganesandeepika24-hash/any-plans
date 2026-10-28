@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.understand.clarify import Question, questions
 from app.understand.llm import LLMClient, LLMConfig, LLMError, schema_instruction
-from app.understand.resolve import Missing, Note, Point, resolve
+from app.understand.resolve import LocationSource, Missing, Note, Point, resolve
 from app.understand.schema import SearchFilters, UnderstoodQuery, strict_json_schema
 from app.understand.store import Store, StoreError
 from app.understand.tracing import Tracer, now_ns
@@ -61,6 +61,7 @@ class UnderstandResult:
     missing: tuple[Missing, ...] = ()
     questions: tuple[Question, ...] = ()
     used_location: bool = False  # filters' lat and lon are the user's own point
+    location_source: LocationSource | None = None  # device or pin, when that point was used
     understood: UnderstoodQuery | None = None
     provider: str | None = None
     attempts: list[Attempt] = field(default_factory=list)
@@ -195,6 +196,7 @@ class Understander:
             result.missing = resolution.missing
             result.questions = questions(resolution.missing, understood, city.name)
             result.used_location = resolution.used_location
+            result.location_source = resolution.location_source
             break
         return result
 

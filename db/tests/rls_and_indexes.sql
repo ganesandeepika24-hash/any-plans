@@ -490,13 +490,13 @@ begin
     raise exception 'understand_context must be executable by service_role only';
   end if;
 
-  -- 014 makes llm_understand v2 active and 015 understand_prompt v3; earlier versions are
+  -- 014 makes llm_understand v2 active and 017 understand_prompt v4; earlier versions are
   -- kept for switching back.
   if (select count(*) from public.config where key = 'llm_understand' and version = 2 and is_active) <> 1
      or (select count(*) from public.config where key = 'llm_understand' and version = 1 and not is_active) <> 1
-     or (select count(*) from public.config where key = 'understand_prompt' and version = 3 and is_active) <> 1
-     or (select count(*) from public.config where key = 'understand_prompt' and version < 3 and not is_active) <> 2 then
-    raise exception 'expected llm_understand v2 and understand_prompt v3 active, with earlier versions kept';
+     or (select count(*) from public.config where key = 'understand_prompt' and version = 4 and is_active) <> 1
+     or (select count(*) from public.config where key = 'understand_prompt' and version < 4 and not is_active) <> 3 then
+    raise exception 'expected llm_understand v2 and understand_prompt v4 active, with earlier versions kept';
   end if;
 
   if (select value_json->'providers'->0->>'provider' from public.config

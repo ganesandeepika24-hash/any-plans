@@ -265,3 +265,9 @@ def test_the_active_prompt_names_every_category_vibe_and_who():
     for value in (*get_args(Category), *get_args(Vibe), *get_args(Who)):
         assert value in prompt, value
     assert "- vibe:" in prompt and "- who:" in prompt
+
+
+def test_the_active_prompt_reads_the_near_me_phrases_and_a_bare_something():
+    prompt = migration_config()["understand_prompt"]["system"]
+    for phrase in ('"near me"', '"nearby me"', '"around me"', '"something near me tonight"'):
+        assert phrase in prompt, phrase

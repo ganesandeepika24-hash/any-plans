@@ -5,6 +5,7 @@ log. No network.
 """
 
 import asyncio
+import json
 import re
 import uuid
 from datetime import UTC, datetime
@@ -468,6 +469,37 @@ def test_an_ok_reply_has_no_missing_or_questions(harness, token):
     body = harness.post({"query": "jazz in soho tonight"}, token).json()
     assert (body["status"], body["missing"], body["questions"]) == ("ok", [], [])
     assert harness.log.rows[0]["missing"] == []
+
+
+@pytest.mark.parametrize("source", ["device", "pin"])
+def test_the_location_source_comes_back_when_the_point_is_used(signing_key, token, source):
+    h = Harness(signing_key, llm=FakeLLM(groq=[NEAR_ME], cloudflare=[]))
+    body = h.post(
+        {"query": "something near me tonight", "location": WATERLOO | {"source": source}}, token
+    ).json()
+    assert (body["status"], body["location_source"]) == ("ok", source)
+    assert source not in json.dumps(h.log.rows)  # the point's source isn't logged either
+
+
+def test_a_location_without_a_source_still_works(signing_key, token):
+    h = Harness(signing_key, llm=FakeLLM(groq=[NEAR_ME], cloudflare=[]))
+    body = h.post({"query": "something near me tonight", "location": WATERLOO}, token).json()
+    assert (body["status"], body["location_source"]) == ("ok", None)
+
+
+def test_a_named_area_wins_and_has_no_location_source(signing_key, token):
+    soho = reply(keywords="jazz", place="Soho", when=when("tonight"))
+    h = Harness(signing_key, llm=FakeLLM(groq=[soho], cloudflare=[]))
+    loc = WATERLOO | {"source": "device"}
+    body = h.post({"query": "jazz in soho tonight", "location": loc}, token).json()
+    assert body["location_source"] is None and body["filters"]["lat"] != WATERLOO["lat"]
+
+
+def test_an_unknown_location_source_is_refused(signing_key, token):
+    h = Harness(signing_key)
+    loc = WATERLOO | {"source": "ip"}
+    assert h.post({"query": "jazz", "location": loc}, token).status_code == 422
+    assert h.llm.calls == []
 
 
 def test_the_users_location_is_searched_but_never_logged_or_traced(signing_key, token):

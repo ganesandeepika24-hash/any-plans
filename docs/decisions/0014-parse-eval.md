@@ -176,3 +176,11 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
   - The runner waits and retries on a Groq 429, rather than falling back.
   - A daily-limit wait stops the run cleanly, with the remaining cases `not_run`.
 
+## Near me (28 Oct 2026, decision 0017)
+
+- **Row 61** ("Something near me tonight") now sends a device location. It expects `needs_clarification` with `missing: ["category"]`, and the request's point marked `device`.
+- **Row 63** is the same query with a dropped pin. It expects the same category question, with the point marked `pin`. It was `ok` with no question.
+- **The scorer** fails area end to end when the point's source differs from `expected.area.source`.
+- **Row 62** is unchanged. It has no location, which stands for refused permission.
+- **Ceiling with a perfect model:** still 47/71.
+

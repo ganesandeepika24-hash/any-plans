@@ -139,6 +139,7 @@ def test_the_users_location_is_searched_but_never_logged(signing_key, token):
     ((filters, _),) = h.backend.calls
     assert (filters["lat"], filters["lon"]) == (51.5031, -0.1132)
     assert body["results"][0]["distance_m"] == 350.0  # shown to the user
+    assert body["location_source"] is None  # this request didn't say where the point came from
     logged = json.dumps([h.log.rows, h.log.results])
     for secret in ("51.5031", "-0.1132", "distance", "350"):
         assert secret not in logged, secret
@@ -192,3 +193,11 @@ async def test_an_event_gone_before_the_lookup_is_dropped_and_ranks_close_up():
 async def test_a_row_search_items_shouldnt_return_is_a_search_error():
     with pytest.raises(SearchError):
         await SearchNode(FakeSearch([event_row(1, title=None)]), FakeEmbed()).run({}, "jazz")
+
+
+def test_search_returns_the_device_source(signing_key, token):
+    h = Harness(signing_key, llm=FakeLLM(groq=[NEAR_ME], cloudflare=[]))
+    loc = WATERLOO | {"source": "device"}
+    body = h.post({"query": "jazz near me tonight", "location": loc}, token).json()
+    assert (body["status"], body["location_source"]) == ("ok", "device")
+    assert "device" not in json.dumps([h.log.rows, h.log.results])

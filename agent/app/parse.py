@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from app.querylog import QueryLog, QueryLogError
 from app.understand.node import AI_RESTING, MAX_QUERY_CHARS, Understander, stored_filters
-from app.understand.resolve import Point
+from app.understand.resolve import LocationSource, Point
 from app.understand.store import Store, StoreError
 
 log = logging.getLogger(__name__)
@@ -50,6 +50,9 @@ class Location(BaseModel):
 
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
+    # "device": read once from the browser, with permission, for "near me". "pin": dropped
+    # on the map. Optional, so a client that doesn't send it still works (decision 0017).
+    source: LocationSource | None = None
 
 
 class ParseRequest(BaseModel):
@@ -92,6 +95,8 @@ class ParseResponse(BaseModel):
     filters: dict[str, Any] | None = None  # search_items' jsonb argument
     vibe: str | None = None  # beside the filters: search_items doesn't take them yet (0015)
     who: str | None = None
+    # Where filters' lat and lon came from, when they're the user's own point (0017).
+    location_source: LocationSource | None = None
     embedding_text: str | None = None
     notes: list[NoteOut] = []
     missing: list[str] = []  # set when status is needs_clarification
@@ -160,7 +165,9 @@ class Parser:
         reservation = (user_id, day)
 
         try:
-            point = Point(location.lat, location.lon) if location is not None else None
+            point = (
+                Point(location.lat, location.lon, location.source) if location is not None else None
+            )
             result = await self._understander.run(query, point)
         except BaseException:
             self._release_reservation(reservation)
@@ -183,6 +190,7 @@ class Parser:
             filters=filters,
             vibe=vibe,
             who=who,
+            location_source=result.location_source,
             embedding_text=result.query_text,
             notes=notes,
             missing=missing,
