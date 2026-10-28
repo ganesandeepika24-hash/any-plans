@@ -25,7 +25,10 @@ Sections marked **Not built yet** describe something the step 1.4 plan asks for 
 ## 1. Base URL, CORS and auth
 
 - **Base URL:** the agent runs on Render. The app reads its address from one setting, `AGENT_URL` (decision 0004), and makes every agent call from one module, `src/lib/api.ts`.
-- **CORS: not built yet.** The agent has no CORS middleware on `main`. A browser on another origin (the Vercel or Netlify site, or Lovable's preview) can't call it until the agent allows that origin. See [Not built yet](#13-not-built-yet).
+- **CORS:** only the exact origins in the agent's `CORS_ORIGINS` setting (comma-separated, set in Render) can call it from a browser: the live site and the Lovable project's address. Preview builds (the Lovable editor preview, Vercel or Netlify branch previews) can't, so test AI search on the live site (owner's choice, 28 Oct 2026). Allowing previews later is one Render setting, `CORS_ORIGIN_REGEX`, with no code change.
+  - Allowed: `GET` and `POST`, with the `Authorization` and `Content-Type` headers. No cookies: don't use `credentials: "include"`.
+  - Errors from the agent, 401 included, carry the CORS header, so the app can read them.
+  - A new site address (a custom domain, a move from Vercel to Netlify) must be added to `CORS_ORIGINS` before it can call the agent. Until then the browser blocks the call, and the app sees a network error.
 - **Auth:** send the signed-in user's Supabase access token as `Authorization: Bearer <access_token>`. The agent checks it against the project's JWKS (ES256), with `aud` = `authenticated` and `iss` = `<SUPABASE_URL>/auth/v1`, and requires `exp`, `sub`, `aud` and `iss`. `sub` must be a UUID. There's no API key and no cookie.
 
 | Endpoint | Sign-in | Notes |
@@ -704,7 +707,6 @@ What the step 1.4 plan asks for that `main` doesn't do. Each needs an agent chan
 
 | Gap | On `main` | Needed |
 |---|---|---|
-| **CORS** | No CORS middleware. A browser on another origin can't call the POST routes, because the `Authorization` header triggers a preflight. | An allow-list of the site's origins and Lovable's preview origin, kept in config. A blocker for the app. |
 | **Confidence label** | No label field on results. | The rule is decided ([section 10](#the-confidence-label-not-built-yet)). Still to build: a label on each result, computed in the agent or database, and the same label on the signed-out path. Because filter-only search reads Supabase directly, the database is the one place both paths share. |
 | **Distance in km** | `distance_m` is in metres. | Nothing, if the app converts metres to miles. A `distance_km` field is a small change if the plan wants it. |
 | **Venue** | Only `venue_name`. No address or venue location on the card. | Add if the card or map needs it. The map needs each event's point, which isn't in `results` either. |

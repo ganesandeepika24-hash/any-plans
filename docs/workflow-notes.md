@@ -2,6 +2,12 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.4 fix 1, CORS
+
+- **The first merge was blocked.** I ran `gh pr merge` on #27 when the owner asked, and Claude Code's auto-mode permission check refused it as a merge without review. The owner merged it on GitHub. Branches start from `main` after that merge, not before.
+- **A bad regex would have crashed startup with the wrong error.** `re.compile` raises `re.error`, which pydantic doesn't turn into a validation error, so a typo in `CORS_ORIGIN_REGEX` would have crashed startup with a raw traceback instead of naming the setting. The new tests caught it on the first run.
+- **10 deliberate breaks, all caught:** allowing `*`, no middleware, credentials on, all methods, the regex ignored, no origin check, http allowed, an http regex allowed, untrimmed origins, an uncompiled regex.
+
 ## 2026-10-28: step 1.4 prep, the API contract
 
 - **`docs/api.md` is the contract for the Lovable front end.** Lovable builds the app's agent calls from it, not from guesses. When an agent route changes, `docs/api.md` changes in the same PR.

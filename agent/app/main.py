@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import Settings, get_settings
 from app.embeddings import embed
@@ -17,6 +18,8 @@ from app.understand.node import Understander
 from app.understand.store import SupabaseStore
 from app.understand.tracing import LangfuseTracer, NullTracer, Tracer
 from app.usage import MeteredLLM, SupabaseUsage
+
+CORS_MAX_AGE_S = 600  # browsers cache a preflight for 10 minutes
 
 
 def build_understander(
@@ -67,6 +70,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Any Plans? agent", lifespan=lifespan)
+    # The browser app is on another origin. Only the addresses in CORS_ORIGINS may call
+    # the agent; auth is a bearer token, so no cookies or credentials mode.
+    settings = get_settings()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_origin_regex=settings.cors_origin_regex,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+        allow_credentials=False,
+        max_age=CORS_MAX_AGE_S,
+    )
     # Public routes. Protected routers take dependencies=[Depends(require_user)].
     app.include_router(health.router)
     # Protected: require_user is a dependency of the route itself.
