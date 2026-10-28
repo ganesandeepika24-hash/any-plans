@@ -598,15 +598,19 @@ Each entry in `results` (`ResultOut`, `agent/app/search.py`):
 
 ### The confidence label (not built yet)
 
-PRD R-02 puts a confidence label on every card, derived from `source` and `last_checked_at`, never from the model (decision 0001). **`main` has no label field.** The rules to apply when it's built:
+PRD R-02 puts a confidence label on every card. **`main` has no label field yet.** The rule was decided on 28 Oct 2026 (`claude/confidence-label-decision-1.4.md`):
 
-| Source kind | Label |
+| Result | Label |
 |---|---|
-| Official API (`ticketmaster`, `skiddle`) | "Price checked today" |
-| Restaurants and unverified sources | "Check availability on [site]" |
+| Official API (`ticketmaster`, `skiddle`) with `last_checked_at` within the last 24 hours | "Price checked today" |
+| Official API with `last_checked_at` older than 24 hours, or null | "Check availability on [site]" |
+| Restaurants, and any result without an official source | "Check availability on [site]" |
 | Web search (Tavily, not built) | "Found on the web today" |
 
-Show the label as text, never colour alone. The open questions are listed in [Not built yet](#13-not-built-yet).
+- **Where it's computed:** in the agent or the database, from `source` and `last_checked_at` only, never by the model (decision 0001). Signed-in and signed-out search show the same label for the same event.
+- **Why 24 hours:** the nightly ingest checks each event once a day, so a check from last night still counts as today. An older check gets "Check availability on [site]" rather than a stale "today" claim.
+- **What the app does:** shows the label text on the card exactly as sent, and never works it out itself. Colour is only an extra cue, never the only one.
+- **[site]:** the site that the card's `url` opens, e.g. "Check availability on Ticketmaster". The exact field shape and site names come with the build (see [Not built yet](#13-not-built-yet)).
 
 ## 11. Errors
 
@@ -701,7 +705,7 @@ What the step 1.4 plan asks for that `main` doesn't do. Each needs an agent chan
 | Gap | On `main` | Needed |
 |---|---|---|
 | **CORS** | No CORS middleware. A browser on another origin can't call the POST routes, because the `Authorization` header triggers a preflight. | An allow-list of the site's origins and Lovable's preview origin, kept in config. A blocker for the app. |
-| **Confidence label** | No label field on results. | A `confidence_label` on each result, from `source` and `last_checked_at` only. Open questions: what an official-API event shows when `last_checked_at` isn't today (ingest runs nightly), and whether the label is computed in the database so filter-only search shows the same one. |
+| **Confidence label** | No label field on results. | The rule is decided ([section 10](#the-confidence-label-not-built-yet)). Still to build: a label on each result, computed in the agent or database, and the same label on the signed-out path. Because filter-only search reads Supabase directly, the database is the one place both paths share. |
 | **Distance in km** | `distance_m` is in metres. | Nothing, if the app converts metres to miles. A `distance_km` field is a small change if the plan wants it. |
 | **Venue** | Only `venue_name`. No address or venue location on the card. | Add if the card or map needs it. The map needs each event's point, which isn't in `results` either. |
 | **The 429 cap reply** | The cap is a 200 `ai_resting` with `reason: "daily_cap"` (decision 0013). No endpoint returns 429. | Nothing, unless the plan changes 0013. |
