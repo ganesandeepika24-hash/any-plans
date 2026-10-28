@@ -56,13 +56,14 @@ The PRD measures parse accuracy (dates, area, budget, category) on an eval set, 
   - Budget: prices, free, whether the price is a total, and the `budget` flag.
   - Category: the set, or the `category` flag when no category is given.
   - Radius: the stated distance in km, within 0.8 km.
-- A resting reply fails every field.
+- A resting case (no provider answered) is a provider failure, not a parse failure. It's listed with its attempts and left out of both accuracies (round 2, below). It used to fail every field.
 - **Parse accuracy** is the share of run rows whose scored fields are all correct. It's reported end to end and model only, with per-field counts.
 
 **Runner and workflow**
 - The real Understand node: real providers, real resolver, and the config from Supabase or the repo.
 - It writes a JSON result (per row: status, filters, reply, marks, attempts and trace ID), prints both accuracies and the failures, and sends two Langfuse scores per row (`parse_end_to_end`, `parse_model_only`). Each score carries the failed fields as its comment, and the config versions, provider and run ID as metadata.
 - It caps at 80 provider calls and exits 1 if every case rested.
+- It paces Groq calls to 7,200 tokens a minute, which is 90% of Groq's limit (round 2). It reports tokens per provider, fallbacks and every attempt's outcome.
 - `.github/workflows/evals.yml` runs it by hand with the repo secrets and uploads the results. Agent CI lints `evals/` and runs the scorer's tests.
 
 **Where the set departs from the seed doc** (rules made later win):
@@ -95,4 +96,52 @@ The PRD measures parse accuracy (dates, area, budget, category) on an eval set, 
   - equivalent dates and spellings, resting replies, the call cap with fallbacks, exit codes, and the Langfuse payload (no keys)
 - **Deliberate breaks:** 15 in the scorer, the cap and the data, all caught. The first round missed two (`include_unpriced` and area spelling), which now have tests.
 - **Ceiling with a perfect model:** end to end 66.2% (47/71), model only 100%.
-- **Baseline (first live run):** pending. It runs after this merges, and the result is recorded here and in `docs/workflow-notes.md`.
+- **First live run** (27 Oct 2026, run 40600304576, live config: `llm_understand` v1, `understand_prompt` v2): end to end 39.2% (20/51), model only 51.0% (26/51). It isn't a baseline, because 20 cases never ran (round 2).
+
+## Round 2: making the eval trustworthy (28 Oct 2026)
+
+The owner's round 2 decisions (27 Oct, items 5 and 6) asked for the provider limits and the 20 cases not run to be explained before the eval is trusted.
+
+**Why 20 cases didn't run.** It was the call cap, not the scorer.
+- Groq returned HTTP 429 on 28 of the 51 cases, and each of those spent a second call on Cloudflare.
+- 51 cases used 79 calls. The runner starts a case only if both providers fit under 80, so it stopped after row 53. Rows 54 to 73 never ran.
+- 4 of the 51 scored cases rested: Cloudflare cut off its reply at 1,024 tokens on rows 9, 34 and 49, and timed out on row 24. Each counted as four failed fields.
+
+**Provider limits** (from the providers' pages, checked 28 Oct 2026):
+
+| | Groq `openai/gpt-oss-20b` | Cloudflare Workers AI `@cf/openai/gpt-oss-20b` |
+|---|---|---|
+| Per minute | 30 requests, 8,000 tokens | 300 requests (default for text generation) |
+| Per day | 1,000 requests, 200,000 tokens | 10,000 neurons free (18,182 neurons per million input tokens, 27,273 per million output) |
+| Scope | per organisation, shared with the live app | per account |
+
+Groq's page says its table shows the Developer plan's base limits. The free tier's exact figures are on the console's limits page, which only the owner can see.
+
+- Tokens per minute is what we hit. The prompt plus the schema is about 6,300 characters, so each call is roughly 2,000 tokens, which allows about 4 calls a minute. The runner made about 13 a minute.
+- A full run of 71 cases needs about 140,000 Groq tokens, about 70% of the daily limit, and the live app shares that limit. Run the eval at most once a day, and not at busy times.
+- Cloudflare costs about 50 neurons a call, so about 200 fallback calls a day.
+
+| Question | Options | Choice | Why |
+|---|---|---|---|
+| Groq's per-minute limit | Raise the cap; retry on 429; **pace calls** | Pace, to 7,200 tokens a minute (90% of 8,000) | Each case keeps Groq's model and uses one call. Retries would still spend refused calls. The live app is untouched: it should still fall back. |
+| Resting cases | Fail every field; **leave them out and list them** | Leave out | A provider outage isn't a parse error. The count is reported next to the accuracy, so a run with many is plainly suspect. No Langfuse score is sent for them. |
+| Cloudflare cut-offs | `reasoning_effort: low`; **more `max_tokens`** | 2,048 tokens (`llm_understand` v2, migration 014) | Cloudflare's docs don't say whether its chat completions endpoint takes a reasoning effort. A third-party config says it doesn't, so it might be rejected or ignored. Only generated tokens are charged. |
+
+**Trade-offs**
+- A paced run takes about 20 minutes (the workflow allows 45).
+- Pacing uses the usage that Groq reports. If Groq counts differently (for example, by reserving `max_tokens` up front), 429s come back. The run then reports them as fallbacks, and the pace needs lowering.
+- Until 014 is applied to Supabase, a live-config run still has Cloudflare at 1,024 tokens. Run `--config repo` to test v2.
+
+**Results**
+- 417 agent tests pass.
+- Deliberate breaks, all caught:
+  - pacing off
+  - pacing off in `main()` (caught only after a test was added)
+  - an empty window that waits
+  - a 2-minute window
+  - cut-off usage not counted
+  - resting cases scored
+  - fallbacks not counted
+  - the limit at 8,000
+  - 014 leaving v1 active (db test)
+- Paced rerun (`--config repo`, so `llm_understand` v2): pending.

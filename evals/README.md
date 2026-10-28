@@ -24,7 +24,12 @@ uv run python ../evals/run_evals.py --config repo     # prompt and models from t
 uv run python ../evals/run_evals.py --config supabase # the live config
 ```
 
-It needs the provider keys in the environment; without them every case rests. On GitHub, run the **Evals** workflow by hand: it uses the repo secrets and uploads the results. A run stops before passing 80 provider calls.
+It needs the provider keys in the environment; without them every case rests. On GitHub, run the **Evals** workflow by hand: it uses the repo secrets and uploads the results.
+
+- A run stops before passing 80 provider calls.
+- It paces Groq to 7,200 tokens a minute, so a full run takes about 20 minutes.
+- A full run uses about 70% of Groq's daily tokens, which the live app shares. Run it at most once a day.
+- Cases where no provider answered are listed as provider failures and left out of the accuracies.
 
 `agent/tests/test_run_evals.py` checks the set and the scorer with a fake model, including which rows a perfect model still fails because of resolver gaps.
 
