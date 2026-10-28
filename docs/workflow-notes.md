@@ -8,6 +8,7 @@ Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 - **A gap between `search_items` and `query_results`.** `search_items` returns event ids but not the `source_id` that `query_results` needs (0007). Caught by reading 010's return columns before writing the node. The node now looks the ids up.
 - **A test fixture that returned everything.** The store test's fake server ignores the key filter, so the new `provider_limits` config row leaked into a test about two keys. The fixture now has only the keys asked for.
 - **A wiring test that checked the wrong thing.** A deliberate break that bypassed the eval's retry in `main()` passed: the test checked that a retry wrapper was built, not that the call counter used it. It now checks what the counter wraps.
+- **CI caught a test I hadn't run.** `jobs/tests/test_query_logging.py` used `route = 'search'` as its example of an unknown route, and 016 makes it valid. I ran the agent suite and the db SQL tests locally, but not the jobs suite's database tests. It now uses `refine`. Lesson: any migration that changes a constraint needs the jobs suite run against a migrated database (`TEST_DATABASE_URL`) before pushing.
 - **Docs not available.** `stage-1-remaining-plan.md` and `near-me-decision-1.6.md` are claude.ai Project files that weren't pasted. Step 1 was built from the owner's message alone.
 
 ## 2026-10-28: step 1.6, round 2, vibe and who
