@@ -93,3 +93,41 @@ Step 4 asks for whole months, seasons, half-term windows, and range options for 
   - the node dropping the choices
 - **Ceiling with a perfect model:** end to end 57/73 (78.1%), up from 53/73. Rows 15, 16, 21 and 68 now pass. Row 36 passes on date and still fails on area (step 5).
 - **Eval:** not run (Groq's daily limit, owner's hold). The rerun is step 6.
+
+## Update 2026-10-28: search_items applies windows (step 1.4 fix 5, migration 024)
+
+- **Why:**
+  - Since 0023, the filter panel (signed in or out) calls `search_items_public`, which refused `windows`. A URL carrying "the next 4 Saturdays" couldn't be searched again with the same days, so the two paths would disagree (PRD F-01).
+  - The fetch-then-filter design above also loses window events when the span holds more than 100 events.
+  - The owner chose option (a) at the fix 5 plan, replacing fetch-then-filter: `search_items` applies `windows` itself.
+- **What changed:**
+  - **Migration 024** replaces `search_items`' body (022's, plus `windows`). It accepts 2 to 31 `[from, to]` pairs, with offsets, in order, not overlapping (touching is allowed), inside `date_from` to `date_to`. Anything else is refused with 22023.
+  - **The rule is the agent's, unchanged:** an event counts if it starts before a window ends, and ends after the window begins. An event with no end is the moment it starts.
+  - The arguments and result columns are 022's, so the function is replaced in place, and the grants are stated again.
+  - `search_items_public` takes `windows` with no change of its own, since it passes `filters` through.
+  - **The Search node** passes `windows` through like any filter. Its 100-row fetch and its own filter are gone, and `AGENT_ONLY_FILTERS` is removed. `SearchFilters.windows` takes at most 31, as the function does.
+  - **`docs/api.md`** gives the URL form: one `w=<from>/<to>` per window, times as sent, `+` encoded. Eight windows and the dates come to about 550 characters.
+- **Apply 024 before the agent deploys.** The agent now sends `windows`, which the function refused before 024.
+- **Tests:**
+  - jobs: 440 pass, 17 of them new:
+    - the on-during rule: inside, between, running across, no end inside, no end just before, ending at `date_from`, starting as a window closes
+    - 150 events between the windows not crowding out the 5 in them
+    - touching windows, 31 allowed
+    - 12 malformed sets refused
+    - the public path equal to the agent's with windows
+  - agent: 706 pass:
+    - windows reach `search_items` whole, with the limit untouched
+    - all 8 windows come back in full and in order on `/parse` and `/search`, inside the dates, and are logged
+    - a month of weekends gives 5
+    - the in-process window tests became database tests
+  - `rls_and_indexes.sql`: `windows` allowed, and the browser path takes it.
+  - `search_perf.sql`: window searches added, with p95 50 ms for `search_items` and 42 ms for the public path.
+- **Deliberate breaks:** 8, all caught:
+  - the no-end moment moved to +3 hours
+  - the overlap check removed
+  - windows ignored
+  - the inside-dates check removed
+  - 32 allowed
+  - the public path dropping windows
+  - the agent stripping windows
+  - the response truncating windows

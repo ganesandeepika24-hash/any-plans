@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 from app.understand.resolve import DateRanges
 from app.understand.schema import (
-    AGENT_ONLY_FILTERS,
     Category,
     SearchFilters,
     UnderstoodQuery,
@@ -25,7 +24,7 @@ from tests.understand_support import REPO, migration_config, reply, when
 SEARCH_ITEMS = [
     p.read_text()
     for p in sorted((REPO / "db" / "migrations").glob("*.sql"))
-    if "create function public.search_items(" in p.read_text()
+    if re.search(r"create (or replace )?function public\.search_items\(", p.read_text())
 ][-1]
 
 
@@ -42,9 +41,9 @@ def search_items_columns() -> list[str]:
 # The contract with search_items ------------------------------------------------
 
 
-def test_search_filters_has_exactly_search_items_keys_and_the_agents_own():
-    assert set(SearchFilters.model_fields) - set(AGENT_ONLY_FILTERS) == set(_sql_array("allowed"))
-    assert not set(AGENT_ONLY_FILTERS) & set(_sql_array("allowed"))
+def test_search_filters_has_exactly_search_items_keys():
+    # windows included: search_items applies it since 024.
+    assert set(SearchFilters.model_fields) == set(_sql_array("allowed"))
 
 
 def test_result_cards_take_their_fields_from_search_items_columns():
