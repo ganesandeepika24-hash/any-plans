@@ -670,3 +670,152 @@ def test_no_active_label_config_is_an_error(search, sql, labels):
     sql("update config set is_active = false where key = 'confidence_labels'")
     with pytest.raises(psycopg.errors.InvalidParameterValue, match="confidence_labels"):
         search()
+
+
+# Filter-only search for everyone: search_items_public (migration 023, decision 0023) ---
+
+CARD_FIELDS = [
+    "id", "source", "title", "category", "genre", "start_at", "end_at", "venue_name",
+    "price_min", "price_max", "currency", "url", "image_url", "last_checked_at",
+    "confidence", "confidence_label", "distance_m", "lat", "lon", "score",
+]  # fmt: skip
+
+
+def both_paths(db_url, filters, role="anon") -> tuple[list[dict], list[dict]]:
+    """The browser's call as `role`, and the agent's search_items with no embedding, in
+    one transaction, so both see the same now()."""
+    with psycopg.connect(db_url, row_factory=dict_row) as conn:
+        f = psycopg.types.json.Jsonb(filters)
+        conn.execute(f"set local role {role}")
+        public = conn.execute("select * from public.search_items_public(%s)", (f,)).fetchall()
+        conn.execute("set local role service_role")
+        agent = conn.execute("select * from public.search_items(%s, null)", (f,)).fetchall()
+        conn.rollback()
+    return public, [{k: r[k] for k in CARD_FIELDS} for r in agent]
+
+
+@pytest.fixture
+def mixed(add, checked, sql, t0):
+    """Events across categories, prices, places, times and freshness."""
+    north = (CENTRE[0] + 3 * KM_LAT, CENTRE[1])
+    add("jazz now", at=1, category="Music", price=(10, 20))
+    add("jazz later", at=30, category="Music", price=(25, 45))
+    add("comedy", at=5, category="Comedy", price=(0, 0))
+    add("theatre", at=50, end=53, category="Theatre", price=(40, 90), point=north)
+    add("unpriced gig", at=3, category="Music")
+    add("nowhere", at=8, category="Arts", price=(5, 5), point=None)
+    add("same start a", at=12, category="Family", price=(12, 12))
+    add("same start b", at=12, category="Family", price=(12, 12))
+    checked("stale tm", hours_ago=40, price=(15, 30))
+    checked("skiddle fresh", source="skiddle", hours_ago=2, price=(8, 8))
+    checked("unpriced fresh", hours_ago=2, price=(None, None))
+    # Embedded, so an embedding slipped into the public path would change their scores.
+    add("embedded near", at=6, category="Music", price=(9, 9), embedding=vec(1.0, 0.0))
+    add("embedded far", at=7, category="Music", price=(9, 9), embedding=vec(0.0, 1.0))
+    return t0
+
+
+def filter_sets(t0) -> list[dict]:
+    return [
+        {},
+        {"date_from": iso(t0), "date_to": iso(t0 + timedelta(hours=24))},
+        {"categories": ["Music", "Comedy"]},
+        {"price_min": 10, "price_max": 30},
+        {"price_max": 0, "include_unpriced": False},
+        {"lat": CENTRE[0], "lon": CENTRE[1], "radius_km": 1},
+        {"limit": 3},
+        {"lat": 51.507333, "lon": -0.127654, "radius_km": 10},  # the default area
+        {
+            "date_from": iso(t0 - timedelta(hours=1)),
+            "date_to": iso(t0 + timedelta(hours=72)),
+            "categories": ["Music", "Theatre", "Family"],
+            "price_max": 50,
+            "lat": CENTRE[0],
+            "lon": CENTRE[1],
+            "radius_km": 5,
+            "limit": 5,
+        },
+        {"include_unpriced": False},
+    ]
+
+
+@pytest.mark.parametrize("n", range(10))
+def test_signed_out_search_gives_exactly_the_agents_results(db_url, mixed, n):
+    # PRD F-01: the same filters give the same rows, order, fields and labels.
+    filters = filter_sets(mixed)[n]
+    public, agent = both_paths(db_url, filters)
+    assert public == agent
+
+
+def test_every_filter_set_finds_something(db_url, mixed):
+    # So the comparison above never passes by comparing two empty lists.
+    for filters in filter_sets(mixed):
+        public, _ = both_paths(db_url, filters)
+        assert public, filters
+
+
+def test_signed_in_filter_search_is_the_same_call(db_url, mixed):
+    public, agent = both_paths(db_url, {"categories": ["Music"]}, role="authenticated")
+    assert public == agent and public
+
+
+def test_the_labels_come_through_unchanged(db_url, mixed):
+    public, _ = both_paths(db_url, {})
+    labels = {r["title"]: r["confidence_label"] for r in public}
+    assert labels["skiddle fresh"] == "Price checked today"
+    assert labels["stale tm"] == "Check availability on Ticketmaster"
+    assert labels["unpriced fresh"] == "Check availability on Ticketmaster"
+
+
+def test_hidden_events_stay_hidden_from_the_public_search(db_url, visibility_cases):
+    public, agent = both_paths(db_url, {"limit": 100})
+    assert {r["title"] for r in public} == {"future", "running", "no end, 2h ago"}
+    assert public == agent
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"windows": [["2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"]]},
+        {"limit": 101},
+        {"lat": 51.5},
+        {"categories": ["Opera"]},
+        {"query_embedding": [0.1]},
+    ],
+)
+def test_the_public_search_refuses_what_search_items_refuses(db_url, filters):
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        conn.execute("set role anon")
+        with pytest.raises(psycopg.errors.InvalidParameterValue):
+            conn.execute(
+                "select * from public.search_items_public(%s)", (psycopg.types.json.Jsonb(filters),)
+            )
+
+
+def test_the_public_search_takes_no_embedding(db_url):
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        conn.execute("set role anon")
+        with pytest.raises(psycopg.errors.UndefinedFunction):
+            conn.execute(
+                "select * from public.search_items_public('{}', %s::extensions.vector)",
+                (vec(1.0),),
+            )
+
+
+@pytest.mark.parametrize("role", ["anon", "authenticated"])
+def test_the_browser_roles_still_cant_reach_search_items_or_config(db_url, role):
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        conn.execute(f"set role {role}")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("select * from public.search_items('{}')")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("select value_json from public.config")
+
+
+def test_the_public_search_works_in_a_read_only_transaction(db_url, add):
+    add("gig")
+    with psycopg.connect(db_url) as conn:
+        conn.read_only = True
+        conn.execute("set local role anon")
+        rows = conn.execute("select title from public.search_items_public('{}')").fetchall()
+    assert rows == [("gig",)]

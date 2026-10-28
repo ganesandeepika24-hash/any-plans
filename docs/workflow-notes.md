@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.4 fix 4, filter-only search through search_items (decision 0023)
+
+- **One deliberate break was missed at first.** The wrapper quietly passing an embedding changed nothing, because no event in the comparison had one. Two embedded events were added, and the break was caught. A comparison is only as good as the data it runs on: the set now also asserts that every filter finds something.
+- **The comparison runs in one transaction.** On separate connections, the two calls would see different `now()` values, which moves the date score and the 24-hour label edge. They'd differ for a reason that isn't a real difference.
+- **The db checks failed locally on leftover test rows.** The jobs tests leave events behind, and `rls_and_indexes.sql` expects only its own rows in `events`. CI runs each on a fresh database. Locally, the tables are cleared between runs.
+- **Ruff flagged a test's f-string SQL.** It now passes the vector as a parameter.
+
 ## 2026-10-28: step 1.4 fix 3, the default-area note (0021 update)
 
 - **The obvious change would have been wrong for refine.** Refine reads the follow-up as a search on its own, and copies that search's notes. With the note on every default-area search, "make it cheaper" on a Soho search would have said "Showing central London." Found by reading `refine.apply` before running tests. Refine now decides from the refined search's centre.
