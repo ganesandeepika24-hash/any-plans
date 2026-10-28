@@ -12,6 +12,10 @@ rest (principle 5):
 
 The earlier filters are stored without the user's own point (0013). If the earlier search
 used it, the follow-up must send the location again, or it asks where.
+
+The default-area note follows the refined search, not the follow-up alone: "make it
+cheaper" on a Soho search shows no "Showing central London.", and on a search of the
+default area it still does (step 1.4 fix 3).
 """
 
 from dataclasses import dataclass
@@ -32,6 +36,7 @@ from app.understand.resolve import (
     Note,
     Point,
     Resolution,
+    default_area_note,
     resolve,
 )
 from app.understand.schema import RefineReply, SearchFilters, UnderstoodQuery
@@ -89,7 +94,9 @@ def apply(
     fresh = resolve(said, now, city, location, ranges)
     new = fresh.filters.model_dump(exclude_none=True)
     f = dict(prior.filters)
-    notes: list[Note] = list(fresh.notes)
+    # The follow-up alone always reads as the default area; whether the refined search is
+    # the default is decided at the end.
+    notes: list[Note] = [n for n in fresh.notes if n.code != "default_area"]
     missing: set[Missing] = set()
     used_location, source = False, None
 
@@ -146,6 +153,9 @@ def apply(
             f.pop(key, None)
         used_location, source = False, None
 
+    if _is_default_area(f, city) and not used_location:
+        notes.append(default_area_note(city))
+
     resolution = Resolution(
         SearchFilters(**f),
         reply.keywords or prior.embedding_text,
@@ -163,6 +173,13 @@ def _take(f: dict, new: dict, keys: tuple[str, ...]) -> None:
         f.pop(key, None)
         if key in new:
             f[key] = new[key]
+
+
+def _is_default_area(f: dict[str, Any], city: City) -> bool:
+    """The refined search is centred on the city's centre: the default area, kept from
+    the earlier search or given again. A changed radius is still the default area."""
+    centre = city.centre
+    return centre is not None and (f.get("lat"), f.get("lon")) == (centre.lat, centre.lon)
 
 
 def _change_price(f, reply, steps: RefineSteps, notes, missing) -> None:

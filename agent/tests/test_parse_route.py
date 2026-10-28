@@ -507,6 +507,25 @@ def test_a_named_area_wins_and_has_no_location_source(signing_key, token):
     assert body["location_source"] is None and body["filters"]["lat"] != WATERLOO["lat"]
 
 
+@pytest.mark.parametrize(
+    ("fields", "noted"),
+    [
+        ({}, True),  # no place: central London
+        ({"place": "London"}, True),
+        ({"place": "Soho"}, False),
+    ],
+)
+def test_the_default_area_comes_back_with_its_note(signing_key, token, fields, noted):
+    # Step 1.4 fix 3: the app shows "Showing central London." from the note alone.
+    jazz = reply(keywords="jazz", categories=["Music"], when=when("tonight"), **fields)
+    h = Harness(signing_key, llm=FakeLLM(groq=[jazz], cloudflare=[]))
+    body = h.post({"query": "jazz tonight"}, token).json()
+    note = {"code": "default_area", "message": "Showing central London."}
+    assert (note in body["notes"]) is noted
+    (row,) = h.log.rows
+    assert row["notes"] == body["notes"]
+
+
 def test_an_unknown_location_source_is_refused(signing_key, token):
     h = Harness(signing_key)
     loc = WATERLOO | {"source": "ip"}

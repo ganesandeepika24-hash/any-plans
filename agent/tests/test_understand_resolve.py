@@ -9,6 +9,7 @@ import pytest
 from app.understand.resolve import (
     NO_RANGES,
     DateRanges,
+    Note,
     Point,
     date_window,
     normalise,
@@ -152,17 +153,23 @@ def test_an_impossible_date_drops_dates_and_says_so():
         understood(when=when("date", month=2, day=30), categories=["Music"]), WED_EVENING, CITY
     )
     assert r.filters.date_from is None and r.filters.categories == ["Music"]
-    assert [n.code for n in r.notes] == ["no_such_date"]
+    assert [n.code for n in r.notes] == ["no_such_date", "default_area"]
 
 
 # Calendar (decision 0019) ----------------------------------------------------------
+
+
+def date_notes(r) -> list[str]:
+    """The note codes about dates: these searches name no place, so every one also gets
+    default_area, which the place tests check."""
+    return [n.code for n in r.notes if n.code != "default_area"]
 
 
 def event_window(event, now=WED_EVENING, **fields):
     r = resolve(understood(event=event, **fields), now, CITY)
     f = r.filters
     got = None if f.date_from is None else (f.date_from.isoformat(), f.date_to.isoformat())
-    return got, r.missing, [n.code for n in r.notes]
+    return got, r.missing, date_notes(r)
 
 
 @pytest.mark.parametrize(
@@ -300,7 +307,7 @@ def spans(w, now=WED_EVENING, ranges=RANGES):
         windows,
         r.missing,
         r.date_choices,
-        [n.code for n in r.notes],
+        date_notes(r),
     )
 
 
@@ -664,9 +671,11 @@ def test_london_itself_is_central_london_with_a_note(place):
 
 
 @pytest.mark.parametrize("place", ["central London", "Central london", "central  London"])
-def test_central_london_typed_is_the_citys_centre_with_no_note(place):
+def test_central_london_typed_is_the_citys_centre_and_says_so(place):
+    # Every default-area search says so, typed or not (step 1.4 fix 3).
     r = resolve(understood(place=place), WED_EVENING, CITY)
-    assert central(r.filters) and r.notes == ()
+    assert central(r.filters)
+    assert r.notes == (Note("default_area", "Showing central London."),)
 
 
 def test_what_wins_a_place_then_the_events_area_then_the_users_point_then_the_default():
@@ -684,6 +693,27 @@ def test_what_wins_a_place_then_the_events_area_then_the_users_point_then_the_de
     assert (r.filters.lat, r.filters.lon) == (home.lat, home.lon) and r.used_location
     # And with nothing, the default.
     assert central(resolve(understood(keywords="jazz"), WED_EVENING, CITY).filters)
+
+
+def test_only_the_default_area_says_showing_central_london():
+    # Step 1.4 fix 3: the note goes with the default area, and only with it.
+    home = Point(51.5031, -0.1132, "device")
+    default = [
+        resolve(understood(keywords="jazz"), WED_EVENING, CITY),
+        resolve(understood(event="Hanukkah"), WED_EVENING, CITY),
+        resolve(understood(categories=["Music"], unclear=["category"]), WED_EVENING, CITY),
+    ]
+    for r in default:
+        assert central(r.filters)
+        assert r.notes == (Note("default_area", "Showing central London."),)
+    elsewhere = [
+        resolve(understood(place="Soho"), WED_EVENING, CITY),
+        resolve(understood(event="Chelsea Flower Show"), WED_EVENING, CITY),
+        resolve(understood(keywords="jazz"), WED_EVENING, CITY, home),
+        resolve(understood(place="Narnia"), WED_EVENING, CITY),  # its own note says so
+    ]
+    for r in elsewhere:
+        assert "default_area" not in [n.code for n in r.notes]
 
 
 def test_an_event_with_no_area_uses_the_default():
@@ -745,14 +775,14 @@ def test_prices_pass_through_and_unpriced_stays_at_the_default():
 def test_an_inverted_price_range_is_dropped_with_a_note():
     r = resolve(understood(price_min=30, price_max=10), WED_EVENING, CITY)
     assert (r.filters.price_min, r.filters.price_max) == (None, None)
-    assert [n.code for n in r.notes] == ["price_range_inverted"]
+    assert [n.code for n in r.notes] == ["default_area", "price_range_inverted"]
 
 
 def test_keywords_become_the_query_text_and_nothing_said_means_central_london():
     r = resolve(understood(keywords="drag brunch"), WED_EVENING, CITY)
     assert r.query_text == "drag brunch"
     assert r.filters.to_json() == {"lat": 51.507333, "lon": -0.127654, "radius_km": 10.0}
-    assert r.notes == ()
+    assert r.notes == (Note("default_area", "Showing central London."),)
 
 
 def test_a_full_query():

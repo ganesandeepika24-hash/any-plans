@@ -2,6 +2,12 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.4 fix 3, the default-area note (0021 update)
+
+- **The obvious change would have been wrong for refine.** Refine reads the follow-up as a search on its own, and copies that search's notes. With the note on every default-area search, "make it cheaper" on a Soho search would have said "Showing central London." Found by reading `refine.apply` before running tests. Refine now decides from the refined search's centre.
+- **33 existing tests asserted exact note lists.** Most were date tests that never meant to check the place. They now compare date notes only, through one helper. The tests about the place and the notes themselves expect `default_area` explicitly.
+- **A check script failed for its own reason.** It ran with a different `SUPABASE_URL` from the tests, so every token was refused with a 401, and the examples looked wrong. Rerun with the tests' URL, both examples matched.
+
 ## 2026-10-28: step 1.4 fix 2, the confidence label and event points (decision 0022)
 
 - **A plan gap the owner settled.** The label rule didn't cover an event with no price, so "Price checked today" would have sat above "Price not listed". I raised it once, in the plan. The owner chose "Check availability on [site]".
