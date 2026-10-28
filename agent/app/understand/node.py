@@ -26,7 +26,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.understand.clarify import Question, questions
 from app.understand.llm import LLMClient, LLMConfig, LLMError, schema_instruction
 from app.understand.refine import STEPS_KEY, Prior, RefineSteps, apply
-from app.understand.resolve import City, LocationSource, Missing, Note, Point, Resolution, resolve
+from app.understand.resolve import (
+    DATE_RANGES_KEY,
+    City,
+    DateRanges,
+    LocationSource,
+    Missing,
+    Note,
+    Point,
+    Resolution,
+    resolve,
+)
 from app.understand.schema import RefineReply, SearchFilters, UnderstoodQuery, strict_json_schema
 from app.understand.store import Store, StoreError
 from app.understand.tracing import Tracer, now_ns
@@ -142,12 +152,12 @@ class Understander:
         return result
 
     async def _run(self, query: str, location: Point | None, trace) -> UnderstandResult:
-        result, city, understood = await self._ask(
+        result, city, ranges, understood = await self._ask(
             query, trace, "understand_prompt", UnderstoodQuery, "understand"
         )
         if understood is None:
             return result
-        resolution = resolve(understood, self._clock(), city, location)
+        resolution = resolve(understood, self._clock(), city, location, ranges)
         return _resolved(result, understood, resolution, city, understood.vibe, understood.who)
 
     async def _refine(
@@ -158,30 +168,33 @@ class Understander:
             steps = RefineSteps.model_validate(entry.value)
         except (StoreError, ValidationError, KeyError) as exc:
             return UnderstandResult("ai_resting", message=f"{AI_RESTING} (config: {exc})")
-        result, city, reply = await self._ask(
+        result, city, ranges, reply = await self._ask(
             message, trace, "refine_prompt", RefineReply, "refine"
         )
         result.config_versions[STEPS_KEY] = entry.version
         if reply is None:
             return result
-        refined = apply(prior, reply, self._clock(), city, steps, location)
+        refined = apply(prior, reply, self._clock(), city, steps, location, ranges)
         return _resolved(result, reply, refined.resolution, city, refined.vibe, refined.who)
 
     async def _ask[M: UnderstoodQuery](
         self, query: str, trace, prompt_key: str, model: type[M], name: str
-    ) -> tuple[UnderstandResult, City | None, M | None]:
+    ) -> tuple[UnderstandResult, City | None, DateRanges | None, M | None]:
         """Each provider in turn, until one gives a reply that validates as `model`.
-        Returns the result so far (attempts, versions), the city, and the reply or None."""
-        keys = ("llm_understand", prompt_key)
+        Returns the result so far (attempts, versions), the city, the date_ranges config
+        and the reply or None."""
+        keys = ("llm_understand", prompt_key, DATE_RANGES_KEY)
         try:
             entries = await self._store.config(keys)
             versions = {k: entries[k].version for k in keys}
             llm_config = LLMConfig.model_validate(entries["llm_understand"].value)
             prompt = PromptConfig.model_validate(entries[prompt_key].value)
+            ranges = DateRanges.model_validate(entries[DATE_RANGES_KEY].value)
             city = await self._store.city(self._city_id)
         except (StoreError, ValidationError, KeyError) as exc:
             return (
                 UnderstandResult("ai_resting", message=f"{AI_RESTING} (config: {exc})"),
+                None,
                 None,
                 None,
             )
@@ -235,8 +248,8 @@ class Understander:
                 metadata=_attempt_metadata(provider.provider, "ok", versions),
             )
             result.provider = provider.provider
-            return result, city, reply
-        return result, city, None
+            return result, city, ranges, reply
+        return result, city, ranges, None
 
 
 @cache
@@ -267,7 +280,7 @@ def _resolved(
     result.query_text = resolution.query_text
     result.notes = resolution.notes
     result.missing = resolution.missing
-    result.questions = questions(resolution.missing, understood, city.name)
+    result.questions = questions(resolution.missing, understood, city.name, resolution.date_choices)
     result.used_location = resolution.used_location
     result.location_source = resolution.location_source
     result.vibe, result.who = vibe, who

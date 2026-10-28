@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[2]
 MIGRATION_014 = REPO / "db" / "migrations" / "014_llm_understand_v2.sql"
 MIGRATION_016 = REPO / "db" / "migrations" / "016_search_and_usage.sql"
 MIGRATION_018 = REPO / "db" / "migrations" / "018_refine.sql"
-MIGRATION_019 = REPO / "db" / "migrations" / "019_calendar.sql"
+MIGRATION_020 = REPO / "db" / "migrations" / "020_date_ranges.sql"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _QUOTED = r"'((?:[^']|'')*)'"
@@ -95,21 +95,23 @@ def london() -> City:
 
 def migration_config() -> dict[str, Any]:
     """The active config the migrations ship: llm_understand v2 from 014,
-    provider_limits v1 from 016, refine_steps v1 from 018, and understand_prompt v5 and
-    refine_prompt v2 from 019."""
+    provider_limits v1 from 016, refine_steps v1 from 018, and understand_prompt v6,
+    refine_prompt v3 and date_ranges v1 from 020."""
     llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_014.read_text(), re.S).group(1)
     limits = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_016.read_text(), re.S).group(1)
     steps = re.search(
         r"values \('refine_steps', 1, '(.*?)'", MIGRATION_018.read_text(), re.S
     ).group(1)
-    prompts = re.findall(r"\$prompt\$(.*?)\$prompt\$", MIGRATION_019.read_text(), re.S)
-    prompt, refine_prompt = prompts
+    m020 = MIGRATION_020.read_text()
+    prompt, refine_prompt = re.findall(r"\$prompt\$(.*?)\$prompt\$", m020, re.S)
+    ranges = re.search(r"\$json\$(.*?)\$json\$", m020, re.S).group(1)
     return {
         "llm_understand": json.loads(llm),
         "understand_prompt": {"system": prompt},
         "provider_limits": json.loads(limits),
         "refine_prompt": {"system": refine_prompt},
         "refine_steps": json.loads(steps),
+        "date_ranges": json.loads(ranges),
     }
 
 
@@ -147,6 +149,7 @@ def when(
     day: int | None = None,
     qualifier: str | None = None,
     holiday: str | None = None,
+    **spans: Any,  # end_month, end_day, season, count, within (decision 0020)
 ):
     return {
         "kind": kind,
@@ -155,7 +158,7 @@ def when(
         "month": month,
         "day": day,
         "holiday": holiday,
-    }
+    } | spans
 
 
 class FakeStore:

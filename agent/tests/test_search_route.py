@@ -195,6 +195,76 @@ async def test_a_row_search_items_shouldnt_return_is_a_search_error():
         await SearchNode(FakeSearch([event_row(1, title=None)]), FakeEmbed()).run({}, "jazz")
 
 
+# Windows: the next 4 Saturdays (decision 0020) ----------------------------------------
+
+SATURDAYS = [
+    ["2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00"],
+    ["2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"],
+]
+TWO_SATURDAYS = {
+    "date_from": SATURDAYS[0][0],
+    "date_to": SATURDAYS[-1][1],
+    "windows": SATURDAYS,
+}
+
+
+class LimitedSearch(FakeSearch):
+    """search_items as it ranks: best first, cut to the limit (default 20)."""
+
+    async def search(self, filters, embedding):
+        self.calls.append((filters, embedding))
+        return self.rows[: filters.get("limit", 20)]
+
+
+def busy_month() -> list[dict]:
+    # 30 weekday events that score higher than the 5 on a Saturday: with search_items'
+    # default limit they'd fill all 20 places, and filtering after would leave none.
+    weekday = [
+        event_row(n, start_at=f"2026-11-0{2 + n % 4}T19:00:00+00:00", score=2 - n / 100)
+        for n in range(1, 31)
+    ]
+    saturday = [event_row(n, start_at="2026-11-07T19:00:00+00:00") for n in range(31, 36)]
+    return weekday + saturday
+
+
+async def test_weekday_events_cant_fill_the_limit_before_the_saturdays():
+    backend = LimitedSearch(busy_month())
+    hits = await SearchNode(backend, FakeEmbed()).run(TWO_SATURDAYS, None)
+    assert [h.result.title for h in hits] == [f"Event {n}" for n in range(31, 36)]
+    assert [h.result.rank for h in hits] == [1, 2, 3, 4, 5]
+    # search_items got its most rows over the whole span, and never the agent's key.
+    ((sent, _),) = backend.calls
+    assert sent == {"date_from": SATURDAYS[0][0], "date_to": SATURDAYS[-1][1], "limit": 100}
+
+
+async def test_the_requested_limit_applies_after_the_filter():
+    backend = LimitedSearch(busy_month())
+    hits = await SearchNode(backend, FakeEmbed()).run(TWO_SATURDAYS | {"limit": 3}, None)
+    assert [h.result.title for h in hits] == ["Event 31", "Event 32", "Event 33"]
+    assert backend.calls[0][0]["limit"] == 100
+
+
+async def test_an_event_running_across_a_saturday_counts_and_one_ending_before_does_not():
+    rows = [
+        # An exhibition from Thursday to Sunday: on during Saturday.
+        event_row(1, start_at="2026-11-05T10:00:00+00:00", end_at="2026-11-08T18:00:00+00:00"),
+        # Friday night, ending at 23:00: not on Saturday.
+        event_row(2, start_at="2026-11-06T19:00:00+00:00", end_at="2026-11-06T23:00:00+00:00"),
+        # No end: the moment it starts, 01:00 on Sunday, still Saturday night.
+        event_row(3, start_at="2026-11-08T01:00:00+00:00"),
+        # No end, on a Sunday afternoon.
+        event_row(4, start_at="2026-11-08T15:00:00+00:00"),
+    ]
+    hits = await SearchNode(FakeSearch(rows), FakeEmbed()).run(TWO_SATURDAYS, None)
+    assert [h.result.title for h in hits] == ["Event 1", "Event 3"]
+
+
+async def test_without_windows_the_filters_go_through_unchanged():
+    backend = LimitedSearch(busy_month())
+    hits = await SearchNode(backend, FakeEmbed()).run({"date_from": SATURDAYS[0][0]}, None)
+    assert len(hits) == 20 and backend.calls[0][0] == {"date_from": SATURDAYS[0][0]}
+
+
 def test_search_returns_the_device_source(signing_key, token):
     h = Harness(signing_key, llm=FakeLLM(groq=[NEAR_ME], cloudflare=[]))
     loc = WATERLOO | {"source": "device"}

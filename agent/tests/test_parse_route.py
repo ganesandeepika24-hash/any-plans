@@ -278,6 +278,7 @@ def test_one_row_per_ok_query_with_everything_needed(harness, token):
     assert row["config_versions"] == {
         "llm_understand": 1,
         "understand_prompt": 1,
+        "date_ranges": 1,
         "ai_search_cap": 1,
     }
     assert isinstance(row["latency_ms"], int) and row["latency_ms"] >= 0

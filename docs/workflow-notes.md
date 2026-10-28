@@ -2,6 +2,14 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: stage 1 step 4, date ranges (decision 0020)
+
+- **I asked questions the decisions already answered.** Rows 17, 21 and 36 were settled by the PRD and the parser decisions, and the owner had to point back to them. The rule now: check the PRD and `docs/decisions/` first, and ask only about product choices they don't cover, once each.
+- **The plan had one choice where the owner's rule has three.** I offered only "Next 4 Saturdays". The decision gives "Next 4 Saturdays", "This month" and "Pick a month". The owner corrected it at approval.
+- **A gap found by tracing, before testing.** "Saturdays this month" on the last Sunday of a month found no days and would have dropped the date filter, searching everything. It now asks again with the choices. A test pins it.
+- **Ruff moved a line, so one deliberate break didn't apply.** The break script matches exact text, and formatting had joined the node's `questions(...)` call onto one line. The break was rerun against the new text and caught. Check that each break applied before counting it.
+- **Step 3's local jobs failures didn't come back.** On a fresh container all 361 jobs tests passed, including the four `only_service_role_may_call_it` tests that failed locally in step 3. So those failures came from that container's setup, not from the code, as suspected then.
+
 ## 2026-10-28: stage 1 step 3, calendar (decision 0019)
 
 - **Who refreshes the calendar.** The seed runs out after May half-term 2027. Before 1 September 2027, deepika (owner) asks Claude Code to add the 2027 to 2028 rows to `db/seed/calendar.sql`. Each row needs a named source and a check date (half-terms from a named borough's published term dates). deepika then checks the sources and runs the seed against Supabase. Until then, an event with no row asks for a date, which is safe.

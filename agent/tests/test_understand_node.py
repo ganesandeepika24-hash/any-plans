@@ -123,8 +123,17 @@ async def test_the_prompt_comes_from_config():
         FakeStore(entries(llm_understand={"providers": [{"provider": "openai", "model": "x"}]})),
         FakeStore(entries(understand_prompt={"system": ""})),
         FakeStore({k: v for k, v in entries().items() if k != "understand_prompt"}),
+        FakeStore({k: v for k, v in entries().items() if k != "date_ranges"}),
+        FakeStore(entries(date_ranges={"seasons": {}})),
     ],
-    ids=["no providers", "unknown provider", "empty prompt", "prompt missing"],
+    ids=[
+        "no providers",
+        "unknown provider",
+        "empty prompt",
+        "prompt missing",
+        "date ranges missing",
+        "date ranges invalid",
+    ],
 )
 async def test_bad_config_rests_without_calling_any_model(store):
     llm = FakeLLM(groq=[GOOD], cloudflare=[GOOD])
@@ -144,6 +153,15 @@ async def test_an_unreachable_store_rests():
 async def test_queries_must_be_1_to_500_characters(query):
     with pytest.raises(ValueError):
         await understander(FakeLLM()).run(query)
+
+
+async def test_a_recurring_day_asks_with_its_choices():
+    llm = FakeLLM(groq=[reply(keywords="Hamilton", when=when("every_weekday", "sat"))])
+    result = await understander(llm).run("Hamilton on a Saturday")
+    assert (result.status, result.missing) == ("needs_clarification", ("date",))
+    (q,) = result.questions
+    assert q.choices == ("Next 4 Saturdays", "This month", "Pick a month")
+    assert result.config_versions["date_ranges"] == 1
 
 
 async def test_unresolved_parts_come_back_as_notes():

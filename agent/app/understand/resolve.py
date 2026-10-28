@@ -5,6 +5,10 @@ Evenings start at 17:00. A weekend runs from Friday 17:00 to Monday 05:00. Every
 starts no earlier than now. A place or date that can't be resolved drops that filter
 and adds a note, so the UI can say what it ignored.
 
+Months, ranges and seasons are one window; a recurring day ("the next 4 Saturdays") is
+several, kept in `windows` inside one date_from to date_to (decision 0020). A recurring
+day with no count or month asks which, offering choices.
+
 A named event with no date ("Hanukkah", "February half-term") takes its days from the
 city's calendar (decision 0019). When the search can't run without asking (a vague or
 conflicting date, no location for "near me", "cheap", a total price, an event the
@@ -15,11 +19,13 @@ reason goes in `missing`. The rest still resolves, so the answer only fills the 
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Literal
+from typing import Literal, Self
 from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from app.understand.holidays import holiday_days
-from app.understand.schema import SearchFilters, UnderstoodQuery, When
+from app.understand.schema import SearchFilters, Season, UnderstoodQuery, When
 
 DAY_START = time(5)
 EVENING_START = time(17)
@@ -27,7 +33,9 @@ MAX_RADIUS_KM = 100.0  # search_items' limit; the UI slider's 6 miles is the UI'
 KM_PER_MILE = 1.609344
 LOCATION_RADIUS_KM = KM_PER_MILE  # the slider's default, 1 mile, around the user's point
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+PLURAL_DAYS = ("Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays")
 FRIDAY = 4
+DATE_RANGES_KEY = "date_ranges"
 
 NoteCode = Literal[
     "unknown_place",
@@ -38,6 +46,7 @@ NoteCode = Literal[
     "no_price_limit",  # refine: "can spend more" with no price limit to raise
     "radius_floor",  # refine: "closer" than the smallest radius
     "estimated_date",  # the calendar's date for the event is an estimate (decision 0019)
+    "count_capped",  # more recurring days than date_ranges allows (decision 0020)
 ]
 # The complete list, in the order the app asks.
 Missing = Literal["location", "date", "budget", "price_basis", "event_date", "category"]
@@ -53,6 +62,44 @@ MISSING_ORDER: tuple[Missing, ...] = (
 
 class AmbiguousDate(Exception):
     """The date could mean more than one day, or its parts disagree."""
+
+
+class RecurringDate(AmbiguousDate):
+    """A day that repeats, with no count or month: ask which, with these choices."""
+
+    def __init__(self, choices: tuple[str, ...]):
+        super().__init__(choices)
+        self.choices = choices
+
+
+class SeasonSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_month: int = Field(ge=1, le=12)
+    start_day: int = Field(ge=1, le=31)
+    end_month: int = Field(ge=1, le=12)
+    end_day: int = Field(ge=1, le=31)
+
+    @model_validator(mode="after")
+    def _real_days(self) -> Self:
+        for m, d in ((self.start_month, self.start_day), (self.end_month, self.end_day)):
+            date(2000, m, d)  # a leap year, so 29 February is allowed; raises if not a day
+        return self
+
+
+class DateRanges(BaseModel):
+    """Config date_ranges (decision 0020). A season left out asks for a date."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seasons: dict[Season, SeasonSpan]
+    max_range_days: int = Field(ge=1, le=366)  # a longer range asks instead
+    choice_count: int = Field(ge=1, le=12)  # the "Next 4 Saturdays" choice
+    max_count: int = Field(ge=1, le=12)  # "the next 20 Saturdays" stops here, with a note
+
+
+# For callers that don't read config: no seasons, so "this winter" asks.
+NO_RANGES = DateRanges(seasons={}, max_range_days=62, choice_count=4, max_count=8)
 
 
 LocationSource = Literal["device", "pin"]
@@ -133,6 +180,7 @@ class Resolution:
     missing: tuple[Missing, ...] = ()
     used_location: bool = False  # lat and lon are the user's own point: never stored
     location_source: LocationSource | None = None  # that point's source, when used
+    date_choices: tuple[str, ...] = ()  # the date question's taps, for a recurring day
 
 
 def normalise(name: str) -> str:
@@ -143,11 +191,16 @@ def normalise(name: str) -> str:
 
 
 def resolve(
-    understood: UnderstoodQuery, now: datetime, city: City, location: Point | None = None
+    understood: UnderstoodQuery,
+    now: datetime,
+    city: City,
+    location: Point | None = None,
+    ranges: DateRanges = NO_RANGES,
 ) -> Resolution:
     notes: list[Note] = []
     missing: set[Missing] = set()
     fields: dict = {}
+    date_choices: tuple[str, ...] = ()
 
     when = understood.when
     if "date" in understood.unclear:
@@ -168,14 +221,23 @@ def resolve(
                 )
     elif when is not None:
         try:
-            window = date_window(when, now, city.tz)
+            windows = date_windows(when, now, city.tz, ranges)
+        except RecurringDate as exc:
+            missing.add("date")
+            date_choices = exc.choices
         except AmbiguousDate:
             missing.add("date")
         else:
-            if window is None:
+            if not windows:
                 notes.append(Note("no_such_date", _no_such_date(when)))
             else:
-                fields["date_from"], fields["date_to"] = window
+                fields["date_from"], fields["date_to"] = windows[0][0], windows[-1][1]
+                if len(windows) > 1:
+                    fields["windows"] = list(windows)
+                if when.count is not None and when.count > ranges.max_count:
+                    notes.append(
+                        Note("count_capped", f"Showing the next {ranges.max_count}, the most.")
+                    )
 
     if understood.categories:
         fields["categories"] = understood.categories
@@ -193,20 +255,75 @@ def resolve(
         tuple(m for m in MISSING_ORDER if m in missing),
         used_location,
         location.source if used_location and location is not None else None,
+        date_choices,
     )
 
 
 # Dates ---------------------------------------------------------------------------
 
 
-def date_window(when: When, now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime] | None:
+Window = tuple[datetime, datetime]
+
+
+def date_windows(
+    when: When, now: datetime, tz: ZoneInfo, ranges: DateRanges = NO_RANGES
+) -> tuple[Window, ...]:
+    """The windows `when` means, in order: one for most kinds, one per day for a
+    recurring day, none if it has passed or doesn't exist. Raises AmbiguousDate when it
+    could mean more than one thing, and RecurringDate when it needs a count or a month."""
+    if when.kind not in ("every_weekday", "every_weekend"):
+        window = date_window(when, now, tz, ranges)
+        return () if window is None else (window,)
+
+    local_now, day = now.astimezone(tz), local_day(now, tz)
+    weekend = when.kind == "every_weekend"
+    plural = "weekends" if weekend else PLURAL_DAYS[WEEKDAYS.index(when.weekday)]
+    choices = (f"Next {ranges.choice_count} {plural}", "This month", "Pick a month")
+    if when.count is None and when.within is None and when.month is None:
+        raise RecurringDate(choices)
+
+    def window(d: date) -> Window:
+        # A weekend runs from Friday 17:00 to Monday 05:00, as this_weekend does.
+        if weekend:
+            return _at(d, tz, EVENING_START), _at(d + timedelta(days=3), tz)
+        return _at(d, tz), _at(d + timedelta(days=1), tz)
+
+    target = FRIDAY if weekend else WEEKDAYS.index(when.weekday)
+    first = day - timedelta(days=(day.weekday() - target) % 7)  # this week's, maybe past
+    if when.count is not None:
+        start, stop = first, None
+    else:
+        if when.within is not None:
+            month_start = day.replace(day=1)
+            if when.within == "next_month":
+                month_start = _add_month(month_start)
+        else:
+            month_start = _next_month_start(when.month, day)
+        start, stop = month_start, _add_month(month_start)
+    d = start + timedelta(days=(target - start.weekday()) % 7)
+    out: list[Window] = []
+    limit = min(when.count, ranges.max_count) if when.count is not None else None
+    while (stop is None or d < stop) and (limit is None or len(out) < limit):
+        w = window(d)
+        if w[1] > local_now:
+            out.append((max(w[0], local_now), w[1]))
+        d += timedelta(days=7)
+    if not out:
+        raise RecurringDate(choices)  # none left this month: ask again rather than drop
+    return tuple(out)
+
+
+def date_window(
+    when: When, now: datetime, tz: ZoneInfo, ranges: DateRanges = NO_RANGES
+) -> Window | None:
     """The window `when` means, or None if it has passed or doesn't exist. Raises
-    AmbiguousDate when it could mean more than one day."""
+    AmbiguousDate when it could mean more than one day. A recurring day is several
+    windows: use date_windows."""
     local_now = now.astimezone(tz)
     day = local_day(now, tz)
 
     def at(d: date, t: time = DAY_START) -> datetime:
-        return datetime.combine(d, t, tzinfo=tz)
+        return _at(d, tz, t)
 
     match when.kind:
         case "today":
@@ -248,8 +365,64 @@ def date_window(when: When, now: datetime, tz: ZoneInfo) -> tuple[datetime, date
             else:
                 start = at(first)
             end = at(last + timedelta(days=1))
+        case "month" | "this_month" | "next_month":
+            if when.kind == "month":
+                first = _next_month_start(when.month, day)
+            else:
+                first = day.replace(day=1)
+                if when.kind == "next_month":
+                    first = _add_month(first)
+            start, end = at(first), at(_add_month(first))
+        case "range" | "season":
+            if when.kind == "range":
+                span = (when.month, when.day, when.end_month, when.end_day)
+            else:
+                season = ranges.seasons.get(when.season)
+                if season is None:
+                    raise AmbiguousDate  # no dates in config: ask
+                span = (season.start_month, season.start_day, season.end_month, season.end_day)
+            days = _span(*span, day)
+            if days is None:
+                return None
+            first, last = days
+            if when.kind == "range" and (last - first).days + 1 > ranges.max_range_days:
+                raise AmbiguousDate  # too long to be what they meant: ask
+            start, end = at(first), at(last + timedelta(days=1))
+        case "every_weekday" | "every_weekend":
+            raise ValueError("a recurring day is several windows: use date_windows")
     start = max(start, local_now)
     return (start, end) if start < end else None
+
+
+def _at(d: date, tz: ZoneInfo, t: time = DAY_START) -> datetime:
+    return datetime.combine(d, t, tzinfo=tz)
+
+
+def _add_month(first: date) -> date:
+    return date(first.year + first.month // 12, first.month % 12 + 1, 1)
+
+
+def _next_month_start(month: int, today: date) -> date:
+    """The 1st of the next `month` that hasn't ended: this one if it's that month now."""
+    year = today.year if month >= today.month else today.year + 1
+    return date(year, month, 1)
+
+
+def _span(sm: int, sd: int, em: int, ed: int, today: date) -> tuple[date, date] | None:
+    """The first and last day of the next span from sm/sd to em/ed that hasn't ended:
+    the end is the next em/ed from today, and the start the last sm/sd on or before it,
+    so "28 December to 2 January" crosses the year and a span under way counts."""
+    last = _next_date(em, ed, today)
+    if last is None:
+        return None
+    for year in (last.year, last.year - 1):
+        try:
+            first = date(year, sm, sd)
+        except ValueError:
+            continue
+        if first <= last:
+            return first, last
+    return None
 
 
 def local_day(now: datetime, tz: ZoneInfo) -> date:
@@ -322,7 +495,7 @@ def _next_date(month: int, day_of_month: int, today: date) -> date | None:
 
 
 def _no_such_date(when: When) -> str:
-    if when.kind == "date":
+    if when.kind in ("date", "range"):
         return f"No {when.day}/{when.month} in the coming year, so dates were ignored."
     if when.kind == "holiday":
         return "That holiday is beyond the calendar we have, so dates were ignored."

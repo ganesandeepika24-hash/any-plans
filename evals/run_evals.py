@@ -63,11 +63,15 @@ from app.understand.llm import Completion, LLMError, OpenAICompatibleClient, Usa
 from app.understand.node import Understander, UnderstandResult  # noqa: E402
 from app.understand.refine import Prior  # noqa: E402
 from app.understand.resolve import (  # noqa: E402
+    DATE_RANGES_KEY,
     KM_PER_MILE,
+    NO_RANGES,
     AmbiguousDate,
     City,
+    DateRanges,
     Point,
-    date_window,
+    RecurringDate,
+    date_windows,
     normalise,
 )
 from app.understand.schema import RefineReply, UnderstoodQuery, When  # noqa: E402
@@ -182,7 +186,9 @@ def _area_matches(expected: dict | None, result: UnderstandResult, case: dict, c
     return not result.used_location and (f.lat, f.lon) == (area.lat, area.lon)
 
 
-def score_model(case: dict, got: UnderstoodQuery | None, city: City) -> dict[str, bool]:
+def score_model(
+    case: dict, got: UnderstoodQuery | None, city: City, ranges: DateRanges = NO_RANGES
+) -> dict[str, bool]:
     """Each scored field: does the model's reply match the hand-written one (or an
     accepted variant)?"""
     if got is None:
@@ -193,17 +199,22 @@ def score_model(case: dict, got: UnderstoodQuery | None, city: City) -> dict[str
     ]
     now = _moment(case["now"])
     return {
-        name: any(_same(name, got, want, now, city) for want in variants) for name in case["scored"]
+        name: any(_same(name, got, want, now, city, ranges) for want in variants)
+        for name in case["scored"]
     }
 
 
-def _same(name: str, a: UnderstoodQuery, b: UnderstoodQuery, now: datetime, city: City) -> bool:
+def _same(
+    name: str, a: UnderstoodQuery, b: UnderstoodQuery, now: datetime, city: City, ranges
+) -> bool:
     match name:
         case "date":
             unclear = ("date" in a.unclear, "date" in b.unclear)
             if unclear[0] != unclear[1] or (a.event is None) != (b.event is None):
                 return False
-            return unclear[0] or _when(a.when, now, city) == _when(b.when, now, city)
+            return unclear[0] or _when(a.when, now, city, ranges) == _when(
+                b.when, now, city, ranges
+            )
         case "area":
             return (a.near_me, _place(a.place, city)) == (b.near_me, _place(b.place, city))
         case "budget":
@@ -224,12 +235,15 @@ def _same(name: str, a: UnderstoodQuery, b: UnderstoodQuery, now: datetime, city
     raise ValueError(name)
 
 
-def _when(when: When | None, now: datetime, city: City):
-    """Two whens match if they mean the same window ("Saturday" and "31 October")."""
+def _when(when: When | None, now: datetime, city: City, ranges: DateRanges):
+    """Two whens match if they mean the same windows ("Saturday" and "31 October"), or
+    ask the same question (a recurring day's choices name its day)."""
     if when is None:
         return None
     try:
-        return date_window(when, now, city.tz)
+        return date_windows(when, now, city.tz, ranges)
+    except RecurringDate as exc:
+        return ("recurring", exc.choices)
     except AmbiguousDate:
         return "ambiguous"
 
@@ -417,6 +431,7 @@ async def run_cases(
     clock: Clock,
     city: City,
     providers: int,
+    ranges: DateRanges = NO_RANGES,
 ) -> list[CaseResult]:
     results = []
     stopped: str | None = None
@@ -449,7 +464,7 @@ async def run_cases(
                 case["query"],
                 result.status,
                 end_to_end=score_end_to_end(case, result, city),
-                model_only=score_model(case, result.understood, city),
+                model_only=score_model(case, result.understood, city, ranges),
                 missing=list(result.missing),
                 filters=result.filters.to_json() if result.filters else None,
                 reply=result.understood.model_dump(mode="json") if result.understood else None,
@@ -602,11 +617,11 @@ async def main_async(args) -> int:
     cases = load_cases(args.cases)
     async with httpx.AsyncClient() as http:
         if args.config == "repo":
-            # What ships: llm_understand v2 from 014, understand_prompt v5 and refine_prompt
-            # v2 from 019, the seeded areas and calendar.
+            # What ships: llm_understand v2 from 014, understand_prompt v6, refine_prompt
+            # v3 and date_ranges v1 from 020, the seeded areas and calendar.
             from tests.understand_support import FakeStore, entries
 
-            versions = {"llm_understand": 2, "understand_prompt": 5, "refine_prompt": 2}
+            versions = {"llm_understand": 2, "understand_prompt": 6, "refine_prompt": 3}
             store = FakeStore(entries(versions=versions))
         else:
             if not (_env("SUPABASE_URL") and _env("SUPABASE_SERVICE_KEY")):
@@ -645,7 +660,10 @@ async def main_async(args) -> int:
             (await store.config(("llm_understand",)))["llm_understand"].value["providers"]
         )
 
-        results = await run_cases(cases, understander, llm, clock, city, providers)
+        ranges = DateRanges.model_validate(
+            (await store.config((DATE_RANGES_KEY,)))[DATE_RANGES_KEY].value
+        )
+        results = await run_cases(cases, understander, llm, clock, city, providers, ranges)
         summary = summarise(results) | {
             "calls": llm.calls,
             "max_calls": args.max_calls,

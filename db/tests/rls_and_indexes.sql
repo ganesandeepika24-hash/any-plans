@@ -490,13 +490,13 @@ begin
     raise exception 'understand_context must be executable by service_role only';
   end if;
 
-  -- 014 makes llm_understand v2 active and 019 understand_prompt v5; earlier versions are
+  -- 014 makes llm_understand v2 active and 020 understand_prompt v6; earlier versions are
   -- kept for switching back.
   if (select count(*) from public.config where key = 'llm_understand' and version = 2 and is_active) <> 1
      or (select count(*) from public.config where key = 'llm_understand' and version = 1 and not is_active) <> 1
-     or (select count(*) from public.config where key = 'understand_prompt' and version = 5 and is_active) <> 1
-     or (select count(*) from public.config where key = 'understand_prompt' and version < 5 and not is_active) <> 4 then
-    raise exception 'expected llm_understand v2 and understand_prompt v5 active, with earlier versions kept';
+     or (select count(*) from public.config where key = 'understand_prompt' and version = 6 and is_active) <> 1
+     or (select count(*) from public.config where key = 'understand_prompt' and version < 6 and not is_active) <> 5 then
+    raise exception 'expected llm_understand v2 and understand_prompt v6 active, with earlier versions kept';
   end if;
 
   if (select value_json->'providers'->0->>'provider' from public.config
@@ -786,11 +786,29 @@ begin
     raise exception 'understand_context lost its areas';
   end if;
 
-  -- 019 makes refine_prompt v2 active and keeps v1.
+  -- 019 added refine_prompt v2; 020 makes v3 active (its own check, below).
+  if not exists (select 1 from public.config where key = 'refine_prompt' and version = 2) then
+    raise exception 'refine_prompt v2 is missing';
+  end if;
+end $$;
+
+-- Migration 020: date_ranges v1, understand_prompt v6 and refine_prompt v3. Config only.
+do $$
+begin
+  if (select value_json from public.config where key = 'date_ranges' and version = 1 and is_active)
+     is distinct from '{"seasons": {"winter": {"start_month": 11, "start_day": 1, "end_month": 1, "end_day": 31}},
+                        "max_range_days": 62, "choice_count": 4, "max_count": 8}'::jsonb then
+    raise exception 'date_ranges v1 is missing, inactive or changed';
+  end if;
   if (select array_agg(version order by version) from public.config where key = 'refine_prompt')
-       is distinct from array[1, 2]
-     or not exists (select 1 from public.config where key = 'refine_prompt' and version = 2 and is_active) then
-    raise exception 'expected refine_prompt v2 active, with v1 kept';
+       is distinct from array[1, 2, 3]
+     or not exists (select 1 from public.config where key = 'refine_prompt' and version = 3 and is_active) then
+    raise exception 'expected refine_prompt v3 active, with v1 and v2 kept';
+  end if;
+  if not exists (select 1 from public.config
+                  where key = 'understand_prompt' and version = 6 and is_active
+                    and value_json->>'system' like '%every_weekday%') then
+    raise exception 'understand_prompt v6 is not active or lacks the recurring kinds';
   end if;
 end $$;
 

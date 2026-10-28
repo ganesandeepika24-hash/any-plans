@@ -8,11 +8,14 @@ from typing import get_args
 import pytest
 from pydantic import ValidationError
 
+from app.understand.resolve import DateRanges
 from app.understand.schema import (
+    AGENT_ONLY_FILTERS,
     Category,
     SearchFilters,
     UnderstoodQuery,
     Vibe,
+    When,
     Who,
     strict_json_schema,
 )
@@ -29,8 +32,9 @@ def _sql_array(name: str) -> list[str]:
 # The contract with search_items ------------------------------------------------
 
 
-def test_search_filters_has_exactly_search_items_keys():
-    assert set(SearchFilters.model_fields) == set(_sql_array("allowed"))
+def test_search_filters_has_exactly_search_items_keys_and_the_agents_own():
+    assert set(SearchFilters.model_fields) - set(AGENT_ONLY_FILTERS) == set(_sql_array("allowed"))
+    assert not set(AGENT_ONLY_FILTERS) & set(_sql_array("allowed"))
 
 
 def test_categories_match_search_items():
@@ -280,3 +284,53 @@ def test_both_prompts_name_observances_and_half_terms_as_events():
         prompt = config[key]["system"]
         for phrase in ('"Mother\'s Day"', '"February half-term"', '"Carnival, Sunday"'):
             assert phrase in prompt, (key, phrase)
+
+
+def test_both_prompts_name_the_span_kinds_and_no_longer_flag_months_or_seasons():
+    # Decision 0020: months, ranges, seasons and recurring days are when kinds now.
+    config = migration_config()
+    for key in ("understand_prompt", "refine_prompt"):
+        prompt = config[key]["system"]
+        for phrase in ("every_weekday", "every_weekend", "this_month", "- season:", "- range:"):
+            assert phrase in prompt, (key, phrase)
+        assert '"in March"' not in prompt.split('"date": a time')[1], key
+        assert '"this winter"' not in prompt.split('"date": a time')[1], key
+
+
+@pytest.mark.parametrize(
+    ("kind", "parts"),
+    [
+        ("month", {}),  # no month
+        ("range", {"month": 11, "day": 14}),  # no end
+        ("season", {}),  # no season
+        ("every_weekday", {}),  # no weekday
+        ("every_weekend", {"weekday": "sat"}),  # a weekend has no weekday
+        ("every_weekday", {"weekday": "sat", "count": 4, "month": 3}),  # two scopes
+        ("weekday", {"weekday": "sat", "count": 4}),  # count without a recurring day
+        ("date", {"month": 11, "day": 14, "season": "winter"}),  # season on a date
+        ("month", {"month": 3, "day": 1}),  # a month has no day
+    ],
+)
+def test_when_parts_must_match_their_kind(kind, parts):
+    with pytest.raises(ValidationError):
+        When.model_validate(when(kind, **parts))
+
+
+def test_a_when_from_an_earlier_prompt_still_validates():
+    # v5 replies have none of the fields v6 added.
+    old = {k: v for k, v in when("weekday", "sat").items()}
+    assert When.model_validate(old).count is None
+
+
+def test_the_date_ranges_config_validates_and_rejects_impossible_days():
+    ranges = DateRanges.model_validate(migration_config()["date_ranges"])
+    assert set(ranges.seasons) == {"winter"}  # the others ask until they're defined
+    bad = migration_config()["date_ranges"]
+    bad["seasons"]["winter"]["end_day"] = 32
+    with pytest.raises(ValidationError):
+        DateRanges.model_validate(bad)
+    bad["seasons"]["winter"] |= {"end_month": 2, "end_day": 30}
+    with pytest.raises(ValidationError):
+        DateRanges.model_validate(bad)
+    with pytest.raises(ValidationError):
+        DateRanges.model_validate(migration_config()["date_ranges"] | {"extra": 1})

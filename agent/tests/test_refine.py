@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from app.understand.node import AI_RESTING, Understander
 from app.understand.refine import Prior, RefineSteps, apply
-from app.understand.resolve import KM_PER_MILE, Point
+from app.understand.resolve import KM_PER_MILE, DateRanges, Point
 from app.understand.schema import RefineReply
 from tests.understand_support import (
     FakeLLM,
@@ -24,6 +24,7 @@ from tests.understand_support import (
 CITY = london()
 NOW = datetime.fromisoformat("2026-10-27T12:00:00+00:00")
 STEPS = RefineSteps.model_validate(migration_config()["refine_steps"])
+RANGES = DateRanges.model_validate(migration_config()["date_ranges"])
 SOHO = next(a for a in CITY.areas if a.id == "london-soho")
 CAMDEN = next(a for a in CITY.areas if a.id == "london-camden")
 HOME = Point(51.5031, -0.1132, "device")
@@ -48,7 +49,7 @@ def _j(v):
 
 
 def refine(prior, location=None, **reply_fields):
-    return apply(prior, follow_up(**reply_fields), NOW, CITY, STEPS, location)
+    return apply(prior, follow_up(**reply_fields), NOW, CITY, STEPS, location, RANGES)
 
 
 def test_the_steps_shipped_take_the_seed_docs_examples():
@@ -228,7 +229,12 @@ async def test_the_node_asks_with_the_refine_prompt_and_schema():
     assert call["system"] == migration_config()["refine_prompt"]["system"]
     assert call["user"] == "make it cheaper"  # the follow-up only: the earlier search stays in code
     assert "price_change" in call["schema"]["properties"]
-    assert result.config_versions == {"llm_understand": 1, "refine_prompt": 1, "refine_steps": 1}
+    assert result.config_versions == {
+        "llm_understand": 1,
+        "refine_prompt": 1,
+        "date_ranges": 1,
+        "refine_steps": 1,
+    }
     assert result.understood.price_change == "cheaper"
 
 
@@ -256,3 +262,57 @@ async def test_a_refine_that_needs_the_location_asks_for_it():
     assert (result.status, result.missing) == ("needs_clarification", ("location",))
     assert result.questions[0].reason == "location"
     assert (result.vibe, result.who) == ("Chilled", "Date")
+
+
+# Recurring days (decision 0020) -----------------------------------------------------
+
+SATURDAYS = [
+    ["2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00"],
+    ["2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"],
+]
+SATURDAY_JAZZ = Prior(
+    {
+        "date_from": SATURDAYS[0][0],
+        "date_to": SATURDAYS[-1][1],
+        "windows": SATURDAYS,
+        "price_max": 40,
+    },
+    "jazz",
+)
+
+
+def test_a_change_that_isnt_the_date_keeps_the_saturdays():
+    f = refine(SATURDAY_JAZZ, price_change="cheaper").resolution.filters
+    assert f.price_max == 20 and f.to_json()["windows"] == SATURDAYS
+
+
+def test_a_new_day_replaces_the_saturdays():
+    f = refine(SATURDAY_JAZZ, when=when("weekday", weekday="fri")).resolution.filters
+    assert f.windows is None
+    assert f.date_from.isoformat() == "2026-10-30T05:00:00+00:00"
+
+
+def test_saturdays_in_march_replace_a_weekend():
+    f = refine(MUSIC_UNDER_40, when=when("every_weekday", "sat", month=3)).resolution.filters
+    assert [a.date().isoformat() for a, _ in f.windows] == [
+        "2027-03-06",
+        "2027-03-13",
+        "2027-03-20",
+        "2027-03-27",
+    ]
+    assert f.price_max == 40 and f.categories == ["Music"]
+
+
+def test_any_saturday_as_a_follow_up_asks_with_choices():
+    r = refine(MUSIC_UNDER_40, when=when("every_weekday", "sat")).resolution
+    assert r.missing == ("date",) and r.filters.date_from is None
+    assert r.date_choices == ("Next 4 Saturdays", "This month", "Pick a month")
+
+
+@pytest.mark.anyio
+async def test_no_date_ranges_config_rests_without_calling_a_model():
+    store = FakeStore(entries())
+    del store.entries["date_ranges"]
+    llm = FakeLLM(groq=[cheaper_text()], cloudflare=[])
+    result = await refiner(llm, store).refine("make it cheaper", MUSIC_UNDER_40)
+    assert (result.status, llm.calls) == ("ai_resting", [])
