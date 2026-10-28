@@ -96,3 +96,28 @@ At approval the owner added that "London" and "in London" resolve to central Lon
 - **Deliberate breaks:** 15. Fourteen were caught at once. The scorer accepting any area for `city_centre` passed, and now has a test.
 - **Ceiling with a perfect model:** end to end 72/73 (98.6%), up from 57/73. Only row 23 ("Friday night" from 17:00) still fails. Model only: 73/73.
 - **Eval:** not run (Groq's daily limit, owner's hold). The rerun is step 6.
+
+## Update 2026-10-28: the note on every default-area search (step 1.4, fix 3)
+
+- **Why:** the owner's step 1.4 plan has results say "Showing central London" whenever no area is given. Under this decision, only a typed "London" got the note. A search with no place got the same area but no note, so the app would have had to guess the default from coordinates.
+- **What changed:**
+  - Every search of the default area carries `default_area` ("Showing central London."): no place, "London", or "central London".
+  - "Central London" now gets the note too. The owner's instruction was "whenever the default area is used". A line saying what was searched is harmless when they asked for it.
+  - Unchanged:
+    - An unknown place still gets only its own `unknown_place` note, which already says central London.
+    - A named area, an event's venue area and the user's point get no note.
+    - A context from before 021 has no default and no note.
+  - **Refine:** the follow-up alone always reads as the default area, so its own note is dropped. The refined search gets the note when its centre is still the city's centre and isn't the user's point. "Make it cheaper" on a Soho search shows no note; on a default-area search it keeps one, and "closer" keeps it with the smaller radius.
+- **Eval:** 11 resolver cases (`evals/understand/cases.jsonl`) expect `default_area` now. The parse eval doesn't score notes, so its ceiling is unchanged.
+- **Tests:** 704 agent tests pass, 13 of them new:
+  - the resolver's default and non-default cases
+  - nine refine cases, including a user standing exactly at the centre
+  - the `/parse` route returning and logging the note
+- **Deliberate breaks:** 7, all caught:
+  - the note for typed places only
+  - a second note on unknown places
+  - the text changed
+  - refine keeping the follow-up's own note
+  - refine never adding the note
+  - refine ignoring the user's point
+  - refine requiring the default radius

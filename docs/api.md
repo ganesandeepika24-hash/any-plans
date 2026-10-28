@@ -142,7 +142,7 @@ Content-Type: application/json
 
 ### `ok` with the default area
 
-No place, or just "London", searches central London from the city's row (decision 0021). Typing "London" adds a `default_area` note, and the app shows its message on the results. **With no place at all, the area is the same but there's no note** (the "Something fun" example below has none). The 1.4 plan wants the line in both cases; see [Not built yet](#13-not-built-yet). Request: `{"query": "Comedy in London this weekend"}`.
+No place, "London" or "central London" searches central London from the city's row (decision 0021). **Every search of the default area carries the `default_area` note** (step 1.4 fix 3), and the app shows its message, "Showing central London.", with the results. The app never works out the default area from coordinates: the note is the signal. A named area, an event's own venue area or the user's point gets no such note; an unknown place gets its own `unknown_place` note instead. Request: `{"query": "Comedy in London this weekend"}`.
 
 ```json
 {
@@ -196,7 +196,12 @@ The app asks instead of searching. `filters` holds what did resolve (here the we
   "who": null,
   "location_source": null,
   "embedding_text": "something fun",
-  "notes": [],
+  "notes": [
+    {
+      "code": "default_area",
+      "message": "Showing central London."
+    }
+  ],
   "missing": ["category"],
   "questions": [
     {
@@ -577,7 +582,7 @@ This costs two AI searches for a near-me request (one for each call). The permis
 
 | `code` | Example `message` |
 |---|---|
-| `default_area` | "Showing central London." |
+| `default_area` | "Showing central London." Sent with every search of the default area. |
 | `unknown_place` | "Couldn't find 'Narnia', so showing central London." (or "…so searching around your point.") |
 | `no_such_date` | "That time has already passed, so dates were ignored." |
 | `estimated_date` | "{Event}'s date is an estimate, so check it." |
@@ -729,6 +734,5 @@ What the step 1.4 plan asks for that `main` doesn't do. Each needs an agent chan
 | **The 429 cap reply** | The cap is a 200 `ai_resting` with `reason: "daily_cap"` (decision 0013). No endpoint returns 429. | Nothing, unless the plan changes 0013. |
 | **Image licence flag** | `image_url` is whatever the source's API supplies. No per-image licence field. Both current sources allow display from their own URLs (decision 0001). | A flag only if a source with other terms is added. |
 | **Filter-only search** | No agent endpoint. `search_items` is `service_role` only (decision 0010). The browser can read `events` and `venues` with the publishable key (with venue names through the `venue_id` link), but gets no ranking and no `distance_m`, and has to filter by date, price and distance itself. | A decision on how signed-out search gets the same card fields: a public function, a view, or the browser computing them. |
-| **Default-area line with no place** | The `default_area` note comes only when "London" is typed (decision 0021). A request with no place searches central London without a note. | The agent adds the note whenever the default area is used, so the app never has to guess from coordinates. |
 | **`windows` in the URL** | "The next 4 Saturdays" comes back with `filters.windows`, which the filter panel can't express. | A URL form for it, or accept that a reload widens the dates. |
 | **Answer taps** | Taps go back as appended text (section 8). | Nothing for 1.4. A structured answer (e.g. a vibe tap setting `vibe` directly) is a later option (decision 0015). |

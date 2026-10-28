@@ -47,7 +47,7 @@ NoteCode = Literal[
     "radius_floor",  # refine: "closer" than the smallest radius
     "estimated_date",  # the calendar's date for the event is an estimate (decision 0019)
     "count_capped",  # more recurring days than date_ranges allows (decision 0020)
-    "default_area",  # "London" typed: the default, central London (decision 0021)
+    "default_area",  # the default area, central London, was searched (step 1.4 fix 3)
 ]
 # The complete list, in the order the app asks.
 Missing = Literal["location", "date", "budget", "price_basis", "event_date", "category"]
@@ -570,9 +570,10 @@ def _resolve_place(
                 Note("unknown_place", f"Couldn't find '{place}', so showing central {city.name}.")
             )
             distance = None  # it was a distance from the place we couldn't find
-        elif typed_city and not normalise(understood.place).startswith("central "):
-            # "London" or "in London": they may have meant the whole city, so say so.
-            notes.append(Note("default_area", f"Showing central {city.name}."))
+        else:
+            # Whenever the default is searched, say so: no place, "London" (they may have
+            # meant the whole city) or "central London" (step 1.4 fix 3).
+            notes.append(default_area_note(city))
 
     if distance is not None:
         d = distance
@@ -584,6 +585,10 @@ def _resolve_place(
             radius = MAX_RADIUS_KM
     fields["lat"], fields["lon"], fields["radius_km"] = centre.lat, centre.lon, radius
     return centre is location
+
+
+def default_area_note(city: City) -> Note:
+    return Note("default_area", f"Showing central {city.name}.")
 
 
 def _resolve_price(understood: UnderstoodQuery, fields: dict, notes: list, missing: set) -> None:

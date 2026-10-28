@@ -346,7 +346,8 @@ def test_price_basis_and_event_date_questions():
 )
 def test_bank_holidays_resolve_from_the_snapshot(holiday, expected):
     r = run(when=when("holiday", holiday=holiday))
-    assert days(r) == expected and r.missing == () and r.notes == ()
+    assert days(r) == expected and r.missing == ()
+    assert [n.code for n in r.notes] == ["default_area"]  # no place: central London
 
 
 def test_a_bank_holiday_already_started_starts_now():
@@ -358,7 +359,8 @@ def test_a_bank_holiday_already_started_starts_now():
 def test_a_holiday_beyond_the_snapshot_is_a_note(monkeypatch):
     monkeypatch.setattr(holidays, "bank_holidays", lambda: ((date(2026, 8, 31), "x"),))
     r = run(when=when("holiday", holiday="easter_monday"))
-    assert r.filters.date_from is None and [n.code for n in r.notes] == ["no_such_date"]
+    assert r.filters.date_from is None
+    assert [n.code for n in r.notes] == ["no_such_date", "default_area"]
 
 
 def test_the_snapshot_is_govuk_england_and_wales_and_sorted():

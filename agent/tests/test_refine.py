@@ -336,6 +336,30 @@ def test_a_search_stored_before_the_default_keeps_no_area():
     assert f.lat is None and f.price_max == 20
 
 
+@pytest.mark.parametrize(
+    ("prior", "change", "location", "noted"),
+    [
+        # The refined search is still the default area: the note stays.
+        (Prior(WEEKEND | CENTRAL, "live music"), {"price_change": "cheaper"}, None, True),
+        (Prior(WEEKEND | CENTRAL, "live music"), {"distance_change": "closer"}, None, True),
+        (Prior(WEEKEND | CENTRAL, "music"), {"categories": ["Comedy"]}, None, True),
+        # It isn't: no note, though the follow-up alone would read as the default.
+        (COMEDY_IN_SOHO, {"price_change": "cheaper"}, None, False),
+        (COMEDY_IN_SOHO, {"categories": ["Music"]}, None, False),
+        (Prior(WEEKEND | CENTRAL, "live music"), {"place": "Camden"}, None, False),
+        (NEAR_ME, {"price_change": "cheaper"}, HOME, False),
+        # The user's own point, even standing at Charing Cross, is never the default.
+        (NEAR_ME, {"price_change": "cheaper"}, Point(CITY.centre.lat, CITY.centre.lon), False),
+        (MUSIC_UNDER_40, {"price_change": "cheaper"}, None, False),  # stored before 0021
+    ],
+)
+def test_the_note_follows_the_refined_search_not_the_follow_up(prior, change, location, noted):
+    r = refine(prior, location, **change).resolution
+    codes = [n.code for n in r.notes]
+    assert ("default_area" in codes) is noted
+    assert codes.count("default_area") <= 1
+
+
 def test_in_london_as_a_follow_up_moves_to_the_centre_with_a_note():
     r = refine(COMEDY_IN_SOHO, place="London").resolution
     assert (r.filters.lat, r.filters.lon, r.filters.radius_km) == tuple(CENTRAL.values())
