@@ -2,7 +2,7 @@
 
 This file is the contract between the agent (`agent/`) and the Lovable app (step 1.4). The app works from this file, not from guesses. If the code and this file disagree, the code is right and this file has a bug: raise it, don't work around it.
 
-Written 28 Oct 2026 against `main` at `9edf9fd` (after PR #26). Updated for CORS (PR #28) and for migration 022's confidence label and event points (decision 0022). Every example response below was produced by running the real routes with the agent tests' fakes for the model, the database and the embedder (the harnesses in `agent/tests/test_parse_route.py`, `test_search_route.py` and `test_refine_route.py`). The event rows in the examples are invented. Ids and trace ids differ on every call.
+Written 28 Oct 2026 against `main` at `9edf9fd` (after PR #26). Updated for CORS (PR #28), migration 022's confidence label and event points (decision 0022), filter-only search (023, decision 0023) and windows in both paths (024). Every example response below was produced by running the real routes with the agent tests' fakes for the model, the database and the embedder (the harnesses in `agent/tests/test_parse_route.py`, `test_search_route.py` and `test_refine_route.py`). The event rows in the examples are invented. Ids and trace ids differ on every call.
 
 Sections marked **Not built yet** describe something the step 1.4 plan asks for that `main` doesn't do. Don't build against them as if they exist.
 
@@ -96,7 +96,7 @@ All three POST routes answer with the same fields (`ParseResponse`). `/search` a
 | `include_unpriced` | boolean | `false` drops events with no price (set for "free"). |
 | `lat`, `lon`, `radius_km` | numbers | All three or none. `radius_km` is in km (0 to 100]. |
 | `limit` | integer | 1 to 100. Not set by the parser today: the search returns up to 20. |
-| `windows` | array of `[from, to]` pairs | The agent's own key: only these days count inside `date_from` to `date_to` ("the next 4 Saturdays", decision 0020). The filter panel can't express it. |
+| `windows` | array of 2 to 31 `[from, to]` pairs | Only these days count inside `date_from` to `date_to` ("the next 4 Saturdays", decision 0020). In order, not overlapping, inside the dates. Always sent in full: at most 8 for a recurring day, 5 for a month of them. Carry every one in the URL ([section 12](#windows-in-the-url)). |
 
 ## 4. POST /parse
 
@@ -721,8 +721,39 @@ The agent uses the user's point for that one request and never stores or logs it
 
 - `embedding_text`, `trace_id`, and each result's `score`. They're for the agent's logs and evals. Don't show, store or depend on them.
 - `filters.limit`, if it's ever set.
-- `filters.windows`: the filter panel can't express it, so the URL drops it, and a reload of that URL widens the dates to the whole `date_from` to `date_to` span. See [Not built yet](#14-not-built-yet).
 - Any field added to a response later. The app must not break on unknown fields.
+
+### Windows in the URL
+
+The filters live in the URL (PRD F-02), and the URL must carry **every** window, or a reload searches different days. Both search paths apply `windows` (migration 024), so a URL read back into the filter panel gives the same results as the AI search that made it.
+
+- Write one `w` parameter per window, in order: `w=<from>/<to>`, each time exactly as the agent sent it (ISO 8601 with its offset).
+- Encode the offset's `+` as `%2B`; `/` and `:` can stay as they are.
+- Read them back in order and send them unchanged as `filters.windows`: `[[from, to], ...]`. Don't round, re-zone or drop any.
+- `date_from` and `date_to` go in the URL as well, and windows need them.
+- If the person then changes the dates in the filter panel, drop every `w`: the windows belonged to the old dates.
+- Eight windows come to about 550 characters with the dates, well within URL limits.
+
+"The next 4 Saturdays", searched on Wed 28 Oct 2026, gives these `filters` (the default area as well):
+
+```json
+{
+  "date_from": "2026-10-31T05:00:00+00:00",
+  "date_to": "2026-11-22T05:00:00+00:00",
+  "windows": [
+    ["2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00"],
+    ["2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"],
+    ["2026-11-14T05:00:00+00:00", "2026-11-15T05:00:00+00:00"],
+    ["2026-11-21T05:00:00+00:00", "2026-11-22T05:00:00+00:00"]
+  ]
+}
+```
+
+and this query string (names other than `w` are the app's choice; these are an example):
+
+```
+?date_from=2026-10-31T05:00:00%2B00:00&date_to=2026-11-22T05:00:00%2B00:00&w=2026-10-31T05:00:00%2B00:00/2026-11-01T05:00:00%2B00:00&w=2026-11-07T05:00:00%2B00:00/2026-11-08T05:00:00%2B00:00&w=2026-11-14T05:00:00%2B00:00/2026-11-15T05:00:00%2B00:00&w=2026-11-21T05:00:00%2B00:00/2026-11-22T05:00:00%2B00:00
+```
 
 ## 13. Filter-only search (Supabase)
 
@@ -746,8 +777,7 @@ That's `POST <SUPABASE_URL>/rest/v1/rpc/search_items_public` with the body `{"fi
 
 The same `SearchFilters` keys as in [section 3](#3-shared-response-body), all optional: `date_from`, `date_to`, `categories`, `price_min`, `price_max`, `include_unpriced`, `lat`, `lon`, `radius_km`, `limit`.
 
-- The filter panel builds this object from the URL, and an AI search's `filters` can be passed straight in.
-- **The one exception is `windows`.** Only the agent applies it, and this function refuses it (see [Not built yet](#14-not-built-yet)). Remove it before calling.
+- The filter panel builds this object from the URL, and an AI search's `filters` can be passed straight in, `windows` and all.
 - Times must carry an offset (`2026-10-30T17:00:00+00:00`, or `Z`).
 - `lat`, `lon` and `radius_km` go together; `radius_km` is km, from 0 up to 100.
 - `limit` is 1 to 100, and 20 when left out.
@@ -823,7 +853,7 @@ await supabase.rpc("search_items_public", {
 
 | What | When | What the app does |
 |---|---|---|
-| `error.code` `"22023"`, with a message naming the filter ("search_items: unknown filter keys {windows}", "…limit must be an integer from 1 to 100") | A bad or unknown filter. | A bug in the app: fix the filters. Don't show the message. |
+| `error.code` `"22023"`, with a message naming the filter ("search_items: unknown filter keys {city}", "…limit must be an integer from 1 to 100", "…windows must be in order and not overlap") | A bad or unknown filter. | A bug in the app: fix the filters. Don't show the message. |
 | A network error, or a Supabase 5xx | Supabase is unreachable. | Say search is unavailable and offer to try again. |
 
 ### Not logged
@@ -841,5 +871,4 @@ What the step 1.4 plan asks for that `main` doesn't do. Each needs an agent chan
 | **The 429 cap reply** | The cap is a 200 `ai_resting` with `reason: "daily_cap"` (decision 0013). No endpoint returns 429. | Nothing, unless the plan changes 0013. |
 | **Image licence flag** | `image_url` is whatever the source's API supplies. No per-image licence field. Both current sources allow display from their own URLs (decision 0001). | A flag only if a source with other terms is added. |
 | **Logging filter-only searches** | `search_items_public` only reads, so filter-only searches aren't logged (principle 7). | A small write path for them. Deferred by the owner (28 Oct 2026). |
-| **`windows` in the URL** | "The next 4 Saturdays" comes back with `filters.windows`, which the filter panel can't express. | A URL form for it, or accept that a reload widens the dates. |
 | **Answer taps** | Taps go back as appended text (section 8). | Nothing for 1.4. A structured answer (e.g. a vibe tap setting `vibe` directly) is a later option (decision 0015). |

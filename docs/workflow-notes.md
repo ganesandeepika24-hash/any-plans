@@ -2,6 +2,14 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.4 fix 5, windows in search_items (0020 update)
+
+- **The fix as written wouldn't have been enough.** "The agent's response must return them in full" was already true. The real gap was that the filter panel's function refused `windows` (fix 4), so a URL carrying them couldn't be searched again. I raised it once in the plan, and the owner chose to move windows into `search_items`.
+- **One test expectation was mine, not the code's.** I expected an event ending exactly as the first window opens to count. That moment is also `date_from`, and `search_items`' date filter has always kept only events ending after it, as the agent did before. The test now says so.
+- **A URL length I estimated in the plan was wrong.** I said about 800 characters for eight windows. Measured from a real resolved URL, it's about 550.
+- **The commit landed on the wrong branch.** After I created `feat/windows`, HEAD was switched to `feat/public-search` by something outside my commands, most likely the editor. The reflog shows the checkout. The push then sent an empty `feat/windows`, and GitHub refused the PR as having no commits. `main`'s tree equalled fix 4's commit, so the work was unaffected. I moved the commit onto `feat/windows` and reset `feat/public-search` to its remote. Check `git rev-parse --abbrev-ref HEAD` before committing.
+- **A test helper was the wrong harness for `/parse`.** The search harness overrides only the searcher, so `/parse` would have reached the real Supabase client. The test uses the parse harness for that route.
+
 ## 2026-10-28: step 1.4 fix 4, filter-only search through search_items (decision 0023)
 
 - **One deliberate break was missed at first.** The wrapper quietly passing an embedding changed nothing, because no event in the comparison had one. Two embedded events were added, and the break was caught. A comparison is only as good as the data it runs on: the set now also asserts that every filter finds something.

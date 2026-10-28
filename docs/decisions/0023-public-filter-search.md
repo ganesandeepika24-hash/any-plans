@@ -73,3 +73,7 @@ The same filters give the same rows, order, fields and labels on both paths. An 
 
   The embedding break was missed at first, because none of the comparison's events had an embedding. Two embedded events were added, and it was caught.
 - **Eval:** not run. Parsing doesn't change.
+
+## Update 2026-10-28: windows (migration 024)
+
+`search_items_public` no longer refuses `windows`. `search_items` applies them since 024 (decision 0020's update), and the wrapper passes `filters` through, so a URL's windows give the same results on both paths.

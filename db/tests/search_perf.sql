@@ -142,7 +142,8 @@ begin
 end $$;
 
 -- The public filter search (migration 023): the same function as the signed-out
--- browser calls it, as anon, with no embedding. Same data, same 500 ms limit.
+-- browser calls it, as anon, with no embedding, windows included (024). Same data,
+-- same 500 ms limit.
 do $$
 declare
   f jsonb;
@@ -152,8 +153,15 @@ declare
 begin
   set local role anon;
   for i in -2..99 loop
-    f := case abs(i) % 3
+    f := case abs(i) % 4
       when 0 then '{}'::jsonb
+      when 3 then jsonb_build_object(  -- the next 4 Saturdays (024)
+                    'date_from', to_char(date_trunc('day', now()) + interval '1 day', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                    'date_to', to_char(date_trunc('day', now()) + interval '23 days', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                    'windows', (select jsonb_agg(jsonb_build_array(
+                                  to_char(date_trunc('day', now()) + make_interval(days => 1 + 7 * n), 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                                  to_char(date_trunc('day', now()) + make_interval(days => 2 + 7 * n), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')))
+                                  from generate_series(0, 3) n))
       when 1 then jsonb_build_object('lat', 51.5074 + (random() - 0.5) * 0.2,
                                      'lon', -0.1278 + (random() - 0.5) * 0.3,
                                      'radius_km', 2 + random() * 8,

@@ -992,6 +992,27 @@ begin
   reset role;
 end $$;
 
+-- Migration 024: search_items applies windows. The 010 and 023 blocks above check both
+-- functions' grants after 024's replace.
+do $$
+declare
+  fn constant regprocedure := 'public.search_items(jsonb, extensions.vector)'::regprocedure;
+  w jsonb := jsonb_build_object(
+    'date_from', '2030-01-05T05:00:00+00:00', 'date_to', '2030-01-13T05:00:00+00:00',
+    'windows', jsonb_build_array(
+      jsonb_build_array('2030-01-05T05:00:00+00:00', '2030-01-06T05:00:00+00:00'),
+      jsonb_build_array('2030-01-12T05:00:00+00:00', '2030-01-13T05:00:00+00:00')));
+begin
+  if (select prosrc from pg_proc where oid = fn) !~ '''windows''\]' then
+    raise exception 'search_items does not list windows in its allowed filters';
+  end if;
+
+  -- The browser's path takes windows too.
+  set local role anon;
+  perform * from public.search_items_public(w);
+  reset role;
+end $$;
+
 rollback;
 
 \echo 'rls_and_indexes: all checks passed'

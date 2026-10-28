@@ -776,6 +776,7 @@ def test_hidden_events_stay_hidden_from_the_public_search(db_url, visibility_cas
 @pytest.mark.parametrize(
     "filters",
     [
+        # One window: windows are 2 or more (024); a single day is date_from to date_to.
         {"windows": [["2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"]]},
         {"limit": 101},
         {"lat": 51.5},
@@ -819,3 +820,114 @@ def test_the_public_search_works_in_a_read_only_transaction(db_url, add):
         conn.execute("set local role anon")
         rows = conn.execute("select title from public.search_items_public('{}')").fetchall()
     assert rows == [("gig",)]
+
+
+# Windows: search_items applies them (migration 024, decision 0020 update) ----------
+
+
+def two_windows(t0) -> dict:
+    """Two days a week apart, as "the next 2 Saturdays": [t0, t0+1d) and [t0+7d, t0+8d)."""
+    w1 = (t0, t0 + timedelta(days=1))
+    w2 = (t0 + timedelta(days=7), t0 + timedelta(days=8))
+    return {
+        "date_from": iso(w1[0]),
+        "date_to": iso(w2[1]),
+        "windows": [[iso(w1[0]), iso(w1[1])], [iso(w2[0]), iso(w2[1])]],
+    }
+
+
+def test_only_events_on_during_a_window_count(add, search, t0):
+    add("first day", at=10)
+    add("second day", at=7 * 24 + 3)
+    add("in between", at=3 * 24)  # inside the dates, on no window's day
+    add("running across", at=-10, end=30)  # started before, still on during the first
+    add("no end, inside", at=24 * 7 + 23)  # an event with no end is the moment it starts
+    add("no end, just before", at=-1)
+    # Ends exactly as the first window opens, which is date_from: the date filter (010)
+    # keeps only events ending after date_from, as it did when the agent applied windows.
+    add("ends as it opens", at=-5, end=0)
+    add("ended before", at=-5, end=-1)
+    add("starts as it closes", at=24)  # the first window ends as it starts
+    assert set(titles(search(two_windows(t0)))) == {
+        "first day",
+        "second day",
+        "running across",
+        "no end, inside",
+    }
+
+
+def test_the_limit_counts_only_window_events(add, search, t0):
+    # 150 events between the windows, ranked higher (sooner) than the window events: the
+    # agent's old 100-row fetch would have lost the second window's events.
+    for n in range(150):
+        add(f"between {n}", at=24 + 1 + n % 100)
+    for n in range(5):
+        add(f"second {n}", at=7 * 24 + 1 + n)
+    rows = search(two_windows(t0))
+    assert sorted(titles(rows)) == [f"second {n}" for n in range(5)]
+    assert len(search(two_windows(t0) | {"limit": 3})) == 3
+
+
+def test_windows_that_touch_are_allowed(add, search, t0):
+    # One window may start where the last ended, as the agent's own check allows.
+    add("gig", at=2)
+    f = {
+        "date_from": iso(t0),
+        "date_to": iso(t0 + timedelta(days=2)),
+        "windows": [
+            [iso(t0), iso(t0 + timedelta(days=1))],
+            [iso(t0 + timedelta(days=1)), iso(t0 + timedelta(days=2))],
+        ],
+    }
+    assert titles(search(f)) == ["gig"]
+
+
+def bad_windows(t0) -> list[dict]:
+    good = two_windows(t0)
+    (a1, b1), (a2, b2) = good["windows"]
+    day = timedelta(days=1)
+    return [
+        good | {"windows": "every saturday"},
+        good | {"windows": [[a1, b1]]},  # one
+        good | {"windows": [[a1, b1], [a2]]},  # half a pair
+        good | {"windows": [[a1, b1], [a2, 7]]},  # not a string
+        good | {"windows": [[a1, b1], [a2, b2.replace("+00:00", "")]]},  # no offset
+        good | {"windows": [[a2, b2], [a1, b1]]},  # out of order
+        good | {"windows": [[a1, a2], [b1, b2]]},  # overlapping
+        good | {"windows": [[b1, a1], [a2, b2]]},  # ends before it starts
+        good | {"date_from": b1},  # the first starts before date_from
+        good | {"date_to": a2},  # the last ends after date_to
+        {"windows": good["windows"]},  # no dates
+        {
+            "date_from": iso(t0),
+            "date_to": iso(t0 + 40 * day),
+            "windows": [
+                [iso(t0 + n * day), iso(t0 + n * day + timedelta(hours=1))] for n in range(32)
+            ],
+        },  # 32
+    ]
+
+
+@pytest.mark.parametrize("n", range(12))
+def test_bad_windows_are_refused(search, t0, n):
+    with pytest.raises(psycopg.errors.InvalidParameterValue):
+        search(bad_windows(t0)[n])
+
+
+def test_thirty_one_windows_are_allowed(add, search, t0):
+    add("gig", at=0.5)
+    day = timedelta(days=1)
+    f = {
+        "date_from": iso(t0),
+        "date_to": iso(t0 + 40 * day),
+        "windows": [[iso(t0 + n * day), iso(t0 + n * day + timedelta(hours=1))] for n in range(31)],
+    }
+    assert titles(search(f)) == ["gig"]
+
+
+def test_signed_out_search_applies_windows_exactly_as_the_agents(db_url, mixed):
+    # PRD F-01 for recurring days: the URL's windows give the same rows on both paths.
+    f = two_windows(mixed) | {"categories": ["Music", "Family", "Comedy"]}
+    public, agent = both_paths(db_url, f)
+    assert public == agent and public
+    assert {r["title"] for r in public} <= {r["title"] for r in both_paths(db_url, {})[0]}

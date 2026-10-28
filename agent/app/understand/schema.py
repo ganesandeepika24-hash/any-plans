@@ -159,12 +159,9 @@ class RefineReply(UnderstoodQuery):
     distance_change: DistanceChange | None  # "somewhere closer", "further out is fine"
 
 
-AGENT_ONLY_FILTERS = ("windows",)
-
-
 class SearchFilters(BaseModel):
-    """search_items' filters, key for key (migration 010; a test compares them), plus
-    AGENT_ONLY_FILTERS, which the Search node applies itself."""
+    """search_items' filters, key for key (migrations 010 and 024; a test compares
+    them)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -178,10 +175,12 @@ class SearchFilters(BaseModel):
     lon: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float | None = Field(default=None, gt=0, le=100)
     limit: int | None = Field(default=None, ge=1, le=100)
-    # The agent's own key, not search_items': the days inside date_from to date_to that
-    # count ("the next 4 Saturdays", decision 0020). The Search node keeps only events
-    # on during one of them.
-    windows: list[tuple[AwareDatetime, AwareDatetime]] | None = Field(default=None, min_length=2)
+    # The days inside date_from to date_to that count ("the next 4 Saturdays", decision
+    # 0020). search_items keeps only events on during one of them (migration 024), and
+    # takes 2 to 31.
+    windows: list[tuple[AwareDatetime, AwareDatetime]] | None = Field(
+        default=None, min_length=2, max_length=31
+    )
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -207,8 +206,8 @@ class SearchFilters(BaseModel):
         return self
 
     def to_json(self) -> dict[str, Any]:
-        """The filters as JSON: only the keys that are set. search_items takes all but
-        `windows`, which the Search node takes off first."""
+        """The filters as JSON, as search_items takes them: only the keys that are set,
+        times in ISO 8601 with their offset."""
         out = self.model_dump(exclude_none=True)
         for key in ("date_from", "date_to"):
             if key in out:

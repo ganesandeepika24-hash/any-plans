@@ -8,9 +8,8 @@
 3. The Search node embeds the search text (in process, fastembed) and calls search_items
    (migration 010) with the filters. vibe and who aren't passed: search_items takes only
    SearchFilters' keys and rejects others (decision 0015). `windows` ("the next 4
-   Saturdays", decision 0020) is the agent's own: the node asks search_items for its
-   most rows across the whole span, keeps the events on during a window, then cuts back
-   to the limit, so weekday events can't fill the limit first.
+   Saturdays", decision 0020) goes through like the rest: search_items applies it
+   (migration 024), so the limit counts only events on during a window.
 4. /refine reads the user's own earlier queries row first, and runs the Refine step on
    its filters instead of Understand. Everything after that is the same.
 5. The events shown are logged to query_results by source and source_id (decision 0007),
@@ -36,8 +35,6 @@ from app.understand.refine import Prior
 log = logging.getLogger(__name__)
 
 TIMEOUT_S = 10.0
-SEARCH_ITEMS_LIMIT = 20  # search_items' default limit (010)
-SEARCH_ITEMS_MAX = 100  # and its most, fetched when windows narrow the results
 SEARCH_UNAVAILABLE = "Search is unavailable right now. Try again in a moment."
 
 
@@ -165,15 +162,7 @@ class SearchNode:
                 (embedding,) = await asyncio.to_thread(self._embed, [query_text])
             except Exception as exc:  # the model failing to load or run
                 raise SearchError(f"embedding failed: {type(exc).__name__}") from exc
-        filters = dict(filters)
-        windows = filters.pop("windows", None)
-        if windows is not None:
-            limit = filters.get("limit", SEARCH_ITEMS_LIMIT)
-            filters["limit"] = SEARCH_ITEMS_MAX
-            spans = [(_moment(a), _moment(b)) for a, b in windows]
         rows = await self._backend.search(filters, embedding)
-        if windows is not None:
-            rows = [r for r in rows if _on_during(r, spans)][:limit]
         ids = await self._backend.source_ids([str(r["id"]) for r in rows])
         hits = []
         for row in rows:
@@ -188,21 +177,6 @@ class SearchNode:
                     f"search_items row didn't validate: {exc.error_count()} errors"
                 ) from exc
         return hits
-
-
-def _moment(value: str) -> datetime:
-    return datetime.fromisoformat(value)
-
-
-def _on_during(row: dict[str, Any], spans: list[tuple[datetime, datetime]]) -> bool:
-    """Whether the event is on during one of the spans: it starts in one, or it's running
-    across one. An event with no end is the moment it starts."""
-    try:
-        start = _moment(row["start_at"])
-        end = _moment(row["end_at"]) if row.get("end_at") else start
-    except (KeyError, TypeError, ValueError) as exc:
-        raise SearchError(f"search_items row has no usable start_at: {exc}") from exc
-    return any(start < b and end >= a for a, b in spans)
 
 
 class SearchResponse(ParseResponse):
