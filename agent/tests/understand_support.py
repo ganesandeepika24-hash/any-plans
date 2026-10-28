@@ -18,6 +18,7 @@ from app.understand.tracing import NullTracer, Trace
 REPO = Path(__file__).resolve().parents[2]
 MIGRATION_014 = REPO / "db" / "migrations" / "014_llm_understand_v2.sql"
 MIGRATION_015 = REPO / "db" / "migrations" / "015_vibe_who.sql"
+MIGRATION_016 = REPO / "db" / "migrations" / "016_search_and_usage.sql"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _QUOTED = r"'((?:[^']|'')*)'"
@@ -59,11 +60,16 @@ def london() -> City:
 
 
 def migration_config() -> dict[str, Any]:
-    """The active config the migrations ship: llm_understand v2 from 014 and
-    understand_prompt v3 from 015."""
+    """The active config the migrations ship: llm_understand v2 from 014,
+    understand_prompt v3 from 015 and provider_limits v1 from 016."""
     llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_014.read_text(), re.S).group(1)
     prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", MIGRATION_015.read_text(), re.S).group(1)
-    return {"llm_understand": json.loads(llm), "understand_prompt": {"system": prompt}}
+    limits = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_016.read_text(), re.S).group(1)
+    return {
+        "llm_understand": json.loads(llm),
+        "understand_prompt": {"system": prompt},
+        "provider_limits": json.loads(limits),
+    }
 
 
 def entries(versions: dict[str, int] | None = None, **overrides: Any) -> dict[str, ConfigEntry]:

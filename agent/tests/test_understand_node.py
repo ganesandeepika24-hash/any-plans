@@ -6,9 +6,11 @@ from datetime import datetime
 import pytest
 
 from app.graph import build_graph
+from app.search import SearchNode
 from app.understand.llm import LLMError
 from app.understand.node import AI_RESTING, Understander
 from app.understand.store import StoreError
+from tests.search_support import VECTOR, FakeEmbed, FakeSearch
 from tests.understand_support import (
     FakeLLM,
     FakeStore,
@@ -205,16 +207,32 @@ async def test_failed_replies_are_traced_with_their_text():
 # The graph --------------------------------------------------------------------------
 
 
-async def test_the_graph_returns_search_items_filters():
-    graph = build_graph(understander(FakeLLM(groq=[GOOD])))
+async def test_the_graph_searches_an_ok_parse_with_its_filters():
+    backend, embed = FakeSearch(), FakeEmbed()
+    graph = build_graph(understander(FakeLLM(groq=[GOOD])), SearchNode(backend, embed))
     state = await graph.ainvoke({"query": "jazz in soho tonight"})
     assert state["status"] == "ok"
     assert state["filters"]["categories"] == ["Music"]
     assert state["filters"]["date_from"] == "2026-10-28T20:00:00+00:00"
     assert state["query_text"] == "jazz" and state["notes"] == []
+    assert backend.calls == [(state["filters"], VECTOR)] and embed.texts == [["jazz"]]
+    assert [r["rank"] for r in state["results"]] == [1, 2]
 
 
-async def test_the_graph_reports_ai_resting():
-    graph = build_graph(understander(FakeLLM(groq=["x"], cloudflare=["x"])))
+async def test_the_graph_reports_ai_resting_without_searching():
+    backend = FakeSearch()
+    graph = build_graph(
+        understander(FakeLLM(groq=["x"], cloudflare=["x"])), SearchNode(backend, FakeEmbed())
+    )
     state = await graph.ainvoke({"query": "jazz tonight"})
     assert (state["status"], state["filters"], state["message"]) == ("ai_resting", None, AI_RESTING)
+    assert backend.calls == [] and "results" not in state
+
+
+async def test_needs_clarification_never_reaches_search():
+    backend = FakeSearch()
+    vague = reply(keywords="fun", unclear=["category"], when=when("this_weekend"))
+    graph = build_graph(understander(FakeLLM(groq=[vague])), SearchNode(backend, FakeEmbed()))
+    state = await graph.ainvoke({"query": "something fun this weekend"})
+    assert (state["status"], state["missing"]) == ("needs_clarification", ["category"])
+    assert backend.calls == [] and "results" not in state

@@ -103,6 +103,19 @@ async def test_http_errors_become_outcomes(status, headers, outcome):
     assert err.value.outcome == outcome
 
 
+@pytest.mark.parametrize(
+    ("header", "seconds"),
+    [("7", 7.0), ("2.5", 2.5), (None, None), ("Wed, 28 Oct 2026 10:00:00 GMT", None), ("-1", None)],
+)
+async def test_a_429_carries_its_retry_after_in_seconds(header, seconds):
+    headers = {"retry-after": header} if header is not None else None
+    llm, http = client(responding(status=429, body={}, headers=headers))
+    async with http:
+        with pytest.raises(LLMError) as err:
+            await llm.complete(PROVIDERS["groq"], "S", "q", SCHEMA)
+    assert err.value.retry_after_s == seconds
+
+
 async def test_a_timeout_is_an_outcome():
     def handler(request):
         raise httpx.ReadTimeout("slow", request=request)

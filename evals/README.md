@@ -31,6 +31,7 @@ It needs the provider keys in the environment; without them every case rests. On
 - It paces Groq to 7,200 tokens a minute, so a full run takes about 20 minutes.
 - A full run uses about 70% of Groq's daily tokens, which the live app shares. Run it at most once a day.
 - Cases where no provider answered are listed as provider failures and left out of the accuracies.
+- If Groq rate-limits a call anyway, the runner waits as long as Groq asks and retries Groq rather than falling back to Cloudflare. A wait over 120 s means Groq's daily limit is used up: the run stops, and the rest of the cases are reported as not run (decision 0016).
 
 `agent/tests/test_run_evals.py` checks the set and the scorer with a fake model, including which rows a perfect model still fails because of resolver gaps.
 

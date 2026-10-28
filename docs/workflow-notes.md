@@ -2,6 +2,14 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: stage 1 step 1, search route and counters
+
+- **The spec's GET would have put the location in URLs.** "GET /search" and "don't log the user's location" conflict, because access logs record URLs. Raised before coding, and the owner chose POST.
+- **A gap between `search_items` and `query_results`.** `search_items` returns event ids but not the `source_id` that `query_results` needs (0007). Caught by reading 010's return columns before writing the node. The node now looks the ids up.
+- **A test fixture that returned everything.** The store test's fake server ignores the key filter, so the new `provider_limits` config row leaked into a test about two keys. The fixture now has only the keys asked for.
+- **A wiring test that checked the wrong thing.** A deliberate break that bypassed the eval's retry in `main()` passed: the test checked that a retry wrapper was built, not that the call counter used it. It now checks what the counter wraps.
+- **Docs not available.** `stage-1-remaining-plan.md` and `near-me-decision-1.6.md` are claude.ai Project files that weren't pasted. Step 1 was built from the owner's message alone.
+
 ## 2026-10-28: step 1.6, round 2, vibe and who
 
 - **Two of the owner's notes disagreed.** Round 2 said a bare "Saturday" asks (row 39), while rule 3 as built and eight eval rows read it as the coming Saturday. Caught by checking the resolver before changing row 39, and settled by the owner (the coming one) before any row changed.

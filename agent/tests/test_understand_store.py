@@ -12,7 +12,9 @@ pytestmark = pytest.mark.anyio
 
 REST = "https://test-project.supabase.co/rest/v1"
 KEYS = ("llm_understand", "understand_prompt")
-CONFIG_ROWS = [{"key": k, "version": 1, "value_json": v} for k, v in migration_config().items()]
+CONFIG_ROWS = [
+    {"key": k, "version": 1, "value_json": v} for k, v in migration_config().items() if k in KEYS
+]
 CONTEXT = {
     "city": {"id": "london", "name": "London", "timezone": "Europe/London"},
     "areas": [

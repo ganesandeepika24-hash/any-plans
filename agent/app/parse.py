@@ -36,6 +36,7 @@ CAP_KEY = "ai_search_cap"
 CAPPED = "Daily AI search limit reached; filters still work"
 
 Reason = Literal["providers", "daily_cap", "unavailable"]
+Route = Literal["parse", "search"]  # queries.route (migrations 002 and 016)
 
 
 class CapConfig(BaseModel):
@@ -127,8 +128,14 @@ class Parser:
         self._pending: Counter[tuple[UUID, date]] = Counter()
 
     async def parse(
-        self, user_id: UUID, query: str, location: Location | None = None
+        self,
+        user_id: UUID,
+        query: str,
+        location: Location | None = None,
+        route: Route = "parse",
     ) -> ParseOutcome:
+        """`route` names the endpoint on the queries row: /search runs this same step
+        first, under the same cap."""
         started = self._monotonic()
         query_id = uuid4()
         day = self._clock().astimezone(UTC).date()
@@ -141,11 +148,13 @@ class Parser:
                 used = await self._log.count_today(user_id, since)
             except (StoreError, QueryLogError, ValidationError, KeyError) as exc:
                 log.warning("daily cap unavailable: %s", exc)
-                return self._resting(query_id, user_id, query, started, "unavailable", AI_RESTING)
+                return self._resting(
+                    query_id, user_id, query, started, route, "unavailable", AI_RESTING
+                )
             cap_versions = {CAP_KEY: entry.version}
             if used + self._pending[(user_id, day)] >= cap:
                 return self._resting(
-                    query_id, user_id, query, started, "daily_cap", CAPPED, cap_versions
+                    query_id, user_id, query, started, route, "daily_cap", CAPPED, cap_versions
                 )
             self._pending[(user_id, day)] += 1
         reservation = (user_id, day)
@@ -195,6 +204,7 @@ class Parser:
             user_id,
             query,
             started,
+            route=route,
             status=result.status,
             provider=result.provider,
             attempts=[
@@ -234,6 +244,7 @@ class Parser:
         user_id: UUID,
         query: str,
         started: float,
+        route: Route,
         reason: Reason,
         message: str,
         config_versions: dict[str, int] | None = None,
@@ -247,6 +258,7 @@ class Parser:
             user_id,
             query,
             started,
+            route=route,
             status=status,
             config_versions=config_versions or {},
         )
@@ -259,6 +271,7 @@ class Parser:
         query: str,
         started: float,
         *,
+        route: Route,
         status: str,
         provider: str | None = None,
         attempts: list[dict[str, str]] | None = None,
@@ -277,7 +290,7 @@ class Parser:
             "id": str(query_id),
             "user_id": str(user_id),
             "city_id": self._city_id,
-            "route": "parse",
+            "route": route,
             "query_text": query,
             "status": status,
             "provider": provider,

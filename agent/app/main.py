@@ -6,14 +6,17 @@ import httpx
 from fastapi import FastAPI
 
 from app.config import Settings, get_settings
+from app.embeddings import embed
 from app.graph import build_graph
 from app.parse import Parser
 from app.querylog import SupabaseQueryLog
-from app.routes import health, parse
+from app.routes import health, parse, search
+from app.search import Searcher, SearchNode, SupabaseSearch
 from app.understand.llm import OpenAICompatibleClient
 from app.understand.node import Understander
 from app.understand.store import SupabaseStore
 from app.understand.tracing import LangfuseTracer, NullTracer, Tracer
+from app.usage import MeteredLLM, SupabaseUsage
 
 
 def build_understander(
@@ -31,16 +34,19 @@ def build_understander(
         )
     else:
         tracer = NullTracer(release=settings.config_version)
-    return Understander(
-        store=store or SupabaseStore(http, settings.rest_url, settings.supabase_service_key),
-        llm=OpenAICompatibleClient(
+    store = store or SupabaseStore(http, settings.rest_url, settings.supabase_service_key)
+    # Every provider call is counted against its daily limit first (decision 0016).
+    llm = MeteredLLM(
+        OpenAICompatibleClient(
             http,
             settings.groq_api_key,
             settings.cloudflare_api_token,
             settings.cloudflare_account_id,
         ),
-        tracer=tracer,
+        store,
+        SupabaseUsage(http, settings.rest_url, settings.supabase_service_key),
     )
+    return Understander(store=store, llm=llm, tracer=tracer)
 
 
 @asynccontextmanager
@@ -49,13 +55,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with httpx.AsyncClient() as http:
         store = SupabaseStore(http, settings.rest_url, settings.supabase_service_key)
         understander = build_understander(settings, http, store)
-        app.state.graph = build_graph(understander)
-        app.state.parser = Parser(
-            understander,
-            store,
-            SupabaseQueryLog(http, settings.rest_url, settings.supabase_service_key),
-            release=settings.config_version,
+        query_log = SupabaseQueryLog(http, settings.rest_url, settings.supabase_service_key)
+        search_node = SearchNode(
+            SupabaseSearch(http, settings.rest_url, settings.supabase_service_key), embed
         )
+        app.state.graph = build_graph(understander, search_node)
+        app.state.parser = Parser(understander, store, query_log, release=settings.config_version)
+        app.state.searcher = Searcher(app.state.parser, search_node, query_log)
         yield
 
 
@@ -65,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     # Protected: require_user is a dependency of the route itself.
     app.include_router(parse.router)
+    app.include_router(search.router)
     return app
 
 

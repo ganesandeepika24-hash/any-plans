@@ -1,7 +1,8 @@
 """The queries table through PostgREST with the service key (migration 002, decision 0013).
 
-count_today backs the daily cap; write records one row per request. query_results is
-written by the search route, not here: /parse shows no events.
+count_today backs the daily cap; write records one row per request. write_results
+records the events /search showed (query_results), after their queries row. /parse
+shows no events, so it writes none.
 """
 
 from datetime import datetime
@@ -25,11 +26,14 @@ class QueryLog(Protocol):
 
     async def write(self, row: dict[str, Any]) -> None: ...
 
+    async def write_results(self, rows: list[dict[str, Any]]) -> None: ...
+
 
 class SupabaseQueryLog:
     def __init__(self, http: httpx.AsyncClient, rest_url: str, service_key: str | None):
         self._http = http
         self._url = rest_url.rstrip("/") + "/queries"
+        self._results_url = rest_url.rstrip("/") + "/query_results"
         self._key = service_key
 
     async def count_today(self, user_id: UUID, since: datetime) -> int:
@@ -63,6 +67,18 @@ class SupabaseQueryLog:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise QueryLogError(f"couldn't write the queries row: {type(exc).__name__}") from exc
+
+    async def write_results(self, rows: list[dict[str, Any]]) -> None:
+        try:
+            response = await self._http.post(
+                self._results_url,
+                json=rows,
+                headers=self._headers() | {"Prefer": "return=minimal"},
+                timeout=TIMEOUT_S,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise QueryLogError(f"couldn't write query_results: {type(exc).__name__}") from exc
 
     def _headers(self) -> dict[str, str]:
         if not self._key:
