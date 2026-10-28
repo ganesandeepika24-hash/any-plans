@@ -63,7 +63,7 @@ CEILING_FAILURES = {
 def run(cases, script, max_calls=80, providers=1, tracer=None):
     llm = run_evals.CountingLLM(FakeLLM(**script), max_calls)
     clock = run_evals.Clock()
-    store = FakeStore(entries(versions={"understand_prompt": 2}))
+    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 2}))
     if providers == 1:
         store.entries["llm_understand"].value["providers"] = store.entries["llm_understand"].value[
             "providers"
@@ -234,13 +234,134 @@ def test_also_accept_variants_count_for_model_only():
     assert all(results[0].model_only.values()) and all(results[0].end_to_end.values())
 
 
-def test_a_resting_reply_fails_every_field():
+def test_a_resting_case_is_a_provider_failure_left_out_of_both_accuracies():
     err = LLMError("http_429", "rate limited")
-    results, _ = run([BY_ROW[64]], {"groq": [err], "cloudflare": []})
-    (r,) = results
-    assert r.status == "ai_resting"
-    assert not any(r.end_to_end.values()) and not any(r.model_only.values())
-    assert run_evals.summarise(results)["resting"] == 1
+    script = perfect([BY_ROW[72]]) | {"groq": [err, json.dumps(BY_ROW[72]["reply"])]}
+    script["cloudflare"] = [LLMError("truncated", "cut off")]
+    results, _ = run([BY_ROW[64], BY_ROW[72]], script, providers=2)
+    resting, answered = results
+    assert resting.status == "ai_resting" and not resting.scored
+    assert not any(resting.end_to_end.values())  # still marked, for the results file
+    summary = run_evals.summarise(results)
+    assert (summary["ran"], summary["scored"], summary["resting"]) == (2, 1, 1)
+    assert summary["end_to_end"]["of"] == summary["model_only"]["of"] == 1
+    assert summary["end_to_end"]["accuracy"] == 1.0
+    assert summary["attempts"] == {"groq:http_429": 1, "cloudflare:truncated": 1, "groq:ok": 1}
+    text = run_evals.report(summary, results)
+    assert "over 1 cases (0 skipped, 0 not run, 1 provider failures)" in text
+    assert (
+        "Provider failures (not scored):\n  r64 'Things to do in Soho this weekend': "
+        "groq:http_429, cloudflare:truncated" in text
+    )
+
+
+def test_a_fallback_answer_is_scored_and_counted():
+    err = LLMError("http_429", "rate limited")
+    script = {"groq": [err], "cloudflare": [json.dumps(BY_ROW[64]["reply"])]}
+    results, _ = run([BY_ROW[64]], script, providers=2)
+    summary = run_evals.summarise(results)
+    assert (summary["scored"], summary["fallbacks"]) == (1, 1)
+    assert summary["providers"] == {"cloudflare": 1}
+
+
+def test_resting_cases_send_no_langfuse_scores():
+    err = LLMError("timeout", "slow")
+    results, _ = run([BY_ROW[64]], {"groq": [err], "cloudflare": [err]}, providers=2)
+    results[0].trace_id = "t1"
+    seen = []
+
+    async def go():
+        transport = httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200))
+        async with httpx.AsyncClient(transport=transport) as http:
+            return await run_evals.send_scores(http, "https://lf.example", "pk", "sk", results, "r")
+
+    assert asyncio.run(go()) == 0 and seen == []
+
+
+# Pacing ----------------------------------------------------------------------------
+
+
+class _Provider:
+    def __init__(self, name):
+        self.provider = name
+
+
+class _Usage:
+    """A fake provider that reports fixed usage, and a clock that sleeping moves on."""
+
+    def __init__(self, used=(1500, 500), fail=None):
+        self.used, self.fail, self.now, self.sleeps = used, fail, 0.0, []
+
+    async def complete(self, config, system, user, schema):
+        if self.fail:
+            raise self.fail
+        return run_evals.Completion("{}", run_evals.Usage(*self.used), 1)
+
+    async def sleep(self, s):
+        self.sleeps.append(s)
+        self.now += s
+
+
+def pacer(fake, limit=7200):
+    return run_evals.TokenPacer(fake, {"groq": limit}, sleep=fake.sleep, monotonic=lambda: fake.now)
+
+
+def calls(p, provider, n):
+    async def go():
+        for _ in range(n):
+            await p.complete(_Provider(provider), "", "", None)
+
+    asyncio.run(go())
+
+
+def test_groq_calls_wait_once_a_minute_of_tokens_is_spent():
+    fake = _Usage()  # 2,000 tokens a call: three fit in 7,200, the fourth waits
+    p = pacer(fake)
+    calls(p, "groq", 4)
+    assert fake.sleeps == [60.0]
+    assert p.tokens["groq"] == 8000 and p.waited_s == 60.0
+
+
+def test_the_wait_is_until_the_oldest_call_leaves_the_window():
+    fake = _Usage()
+    p = pacer(fake)
+    calls(p, "groq", 1)
+    fake.now = 25.0
+    calls(p, "groq", 2)
+    fake.now = 40.0
+    calls(p, "groq", 1)  # 6,000 spent since 0 s; the call at 0 s leaves at 60 s
+    assert fake.sleeps == [20.0]
+
+
+def test_unpaced_providers_never_wait_but_are_counted():
+    fake = _Usage()
+    p = pacer(fake)
+    calls(p, "cloudflare", 10)
+    assert fake.sleeps == [] and p.tokens == {"cloudflare": 20000}
+
+
+def test_a_call_larger_than_the_limit_still_goes_ahead_after_a_full_window():
+    fake = _Usage(used=(9000, 0))
+    p = pacer(fake)
+    calls(p, "groq", 2)
+    assert fake.sleeps == [60.0]  # it waits for an empty window rather than forever
+
+
+def test_refused_calls_spend_nothing_and_cut_off_replies_count():
+    refused = _Usage(fail=LLMError("http_429", "rate limited"))
+    p = pacer(refused)
+    with pytest.raises(LLMError):
+        calls(p, "groq", 1)
+    assert p.tokens == {} and p.spent == {"groq": []}
+    cut = _Usage(fail=LLMError("truncated", "cut off", run_evals.Usage(1500, 2048)))
+    p = pacer(cut)
+    with pytest.raises(LLMError):
+        calls(p, "cloudflare", 1)
+    assert p.tokens == {"cloudflare": 3548}
+
+
+def test_the_groq_pace_is_under_its_published_limit():
+    assert run_evals.TOKENS_PER_MINUTE == {"groq": 7200}  # 90% of 8,000
 
 
 # The call cap ----------------------------------------------------------------------
@@ -284,6 +405,25 @@ def test_a_run_where_every_case_rests_exits_1_and_still_writes_results(monkeypat
     assert run_evals.main(["--config", "repo", "--max-calls", "4", "--out", str(out)]) == 1
     summary = json.loads(out.read_text())["summary"]
     assert (summary["ran"], summary["resting"], summary["calls"]) == (2, 2, 4)
+
+
+def test_a_real_run_paces_groq_and_reports_tokens(monkeypatch, tmp_path):
+    for key in KEYS:
+        monkeypatch.delenv(key, raising=False)
+    made = []
+
+    class Recording(run_evals.TokenPacer):
+        def __init__(self, inner, limits, **kw):
+            super().__init__(inner, limits, **kw)
+            made.append(limits)
+
+    monkeypatch.setattr(run_evals, "TokenPacer", Recording)
+    out = tmp_path / "r.json"
+    run_evals.main(["--config", "repo", "--max-calls", "2", "--out", str(out)])
+    assert made == [{"groq": 7200}]
+    summary = json.loads(out.read_text())["summary"]
+    assert (summary["tokens"], summary["paced_wait_s"]) == ({}, 0.0)
+    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 2}
 
 
 def test_supabase_config_needs_its_keys(monkeypatch, tmp_path):
@@ -333,7 +473,7 @@ def test_scores_go_to_langfuse_with_versions_and_failed_fields():
     assert (e2e["value"], e2e["comment"]) == (0, "failed: date")
     assert e2e["traceId"] == results[1].trace_id
     assert e2e["metadata"]["understand_prompt_version"] == 2
-    assert e2e["metadata"]["llm_understand_version"] == 1
+    assert e2e["metadata"]["llm_understand_version"] == 2
     assert bodies[("r64", "parse_model_only")]["value"] == 1
 
 

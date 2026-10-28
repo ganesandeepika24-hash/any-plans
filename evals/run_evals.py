@@ -19,7 +19,13 @@ and radius only when the user stated one):
   `also_accept` variant), field by field. This isolates the model from the resolver.
 
 A field also checks its clarify reasons: date (date, event_date), area (location),
-budget (budget, price_basis) and category (category). A resting reply fails every field.
+budget (budget, price_basis) and category (category).
+
+A case where no provider answered (resting) is a provider failure, not a parse failure:
+it's listed with its attempts but left out of both accuracies. Groq calls are paced to
+stay under its tokens-per-minute limit, so a rate limit doesn't swap in the fallback
+model or spend a second call. The run reports tokens per provider against the daily
+limits, which the eval shares with the live app.
 
 Environment (never printed): GROQ_API_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID for
 the providers; SUPABASE_URL and SUPABASE_SERVICE_KEY for --config supabase (the live
@@ -37,6 +43,7 @@ import base64
 import json
 import os
 import sys
+import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
@@ -48,7 +55,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "agent"))
 
 import httpx  # noqa: E402
-from app.understand.llm import Completion, OpenAICompatibleClient  # noqa: E402
+from app.understand.llm import Completion, LLMError, OpenAICompatibleClient, Usage  # noqa: E402
 from app.understand.node import Understander, UnderstandResult  # noqa: E402
 from app.understand.resolve import (  # noqa: E402
     KM_PER_MILE,
@@ -64,6 +71,11 @@ from app.understand.tracing import LangfuseTracer, NullTracer  # noqa: E402
 
 CASES = REPO / "evals" / "queries.jsonl"
 MAX_CALLS = 80
+# Groq's published limit for openai/gpt-oss-20b is 8,000 tokens a minute (rate-limits
+# page, checked 28 Oct 2026). Pace to 90% of it: Groq's own count can differ from the
+# usage it reports.
+TOKENS_PER_MINUTE = {"groq": 7200}
+FIRST_CALL_TOKENS = 2500  # a guess for the first call, before any usage is known
 RADIUS_TOLERANCE_KM = 0.8  # about half a mile (seed doc)
 FIELDS = ("date", "area", "budget", "category", "radius")
 REASONS = {
@@ -237,6 +249,56 @@ class CountingLLM:
         return await self.inner.complete(config, system, user, schema)
 
 
+class TokenPacer:
+    """Waits before a call to a paced provider until the last minute's tokens, plus the
+    largest call so far, fit under its limit. Counts every provider's tokens."""
+
+    WINDOW_S = 60.0
+
+    def __init__(self, inner, limits: dict[str, int], sleep=asyncio.sleep, monotonic=None):
+        self.inner = inner
+        self.limits = limits
+        self.sleep = sleep
+        self.monotonic = monotonic or time.monotonic
+        self.spent: dict[str, list[tuple[float, int]]] = {}
+        self.largest: dict[str, int] = {}
+        self.tokens: Counter[str] = Counter()
+        self.waited_s = 0.0
+
+    async def complete(self, config, system, user, schema) -> Completion:
+        provider = config.provider
+        if provider in self.limits:
+            await self._wait(provider)
+        try:
+            completion = await self.inner.complete(config, system, user, schema)
+        except LLMError as exc:
+            self._record(provider, exc.usage)  # a cut-off reply still used tokens
+            raise
+        self._record(provider, completion.usage)
+        return completion
+
+    async def _wait(self, provider: str) -> None:
+        need = self.largest.get(provider, FIRST_CALL_TOKENS)
+        while True:
+            now = self.monotonic()
+            window = [(t, n) for t, n in self.spent.get(provider, []) if now - t < self.WINDOW_S]
+            self.spent[provider] = window
+            # An empty window always goes ahead, so a call larger than the limit can't stall.
+            if not window or sum(n for _, n in window) + need <= self.limits[provider]:
+                return
+            delay = window[0][0] + self.WINDOW_S - now
+            self.waited_s += delay
+            await self.sleep(delay)
+
+    def _record(self, provider: str, usage: Usage) -> None:
+        used = (usage.input_tokens or 0) + (usage.output_tokens or 0)
+        if not used:
+            return  # a refused call (429, timeout) reports none
+        self.spent.setdefault(provider, []).append((self.monotonic(), used))
+        self.largest[provider] = max(self.largest.get(provider, 0), used)
+        self.tokens[provider] += used
+
+
 class Clock:
     def __init__(self):
         self.now: datetime | None = None
@@ -263,7 +325,8 @@ class CaseResult:
 
     @property
     def scored(self) -> bool:
-        return bool(self.end_to_end)
+        """Counted in the accuracies: it ran and a provider answered."""
+        return bool(self.end_to_end) and self.status != "ai_resting"
 
     @property
     def passed(self) -> tuple[bool, bool]:
@@ -330,17 +393,22 @@ def summarise(results: list[CaseResult]) -> dict[str, Any]:
         }
 
     failures = Counter(name for r in scored for name, ok in r.end_to_end.items() if not ok)
+    ran = [r for r in results if r.status != "not_run" and not r.status.startswith("skipped")]
     return {
         "cases": len(results),
-        "ran": len(scored),
+        "ran": len(ran),
+        "scored": len(scored),
         "skipped": sum(r.status.startswith("skipped") for r in results),
         "not_run": sum(r.status == "not_run" for r in results),
         "resting": sum(r.status == "ai_resting" for r in results),
+        # Answered, but not by the first provider: scored, under the fallback model.
+        "fallbacks": sum(not r.attempts[0].endswith(":ok") for r in scored),
+        "attempts": dict(Counter(a for r in ran for a in r.attempts).most_common()),
         "end_to_end": accuracy("end_to_end"),
         "model_only": accuracy("model_only"),
         "failed_fields_end_to_end": dict(failures.most_common()),
         "providers": dict(Counter(r.provider for r in scored if r.provider)),
-        "config_versions": next((r.config_versions for r in scored if r.config_versions), {}),
+        "config_versions": next((r.config_versions for r in ran if r.config_versions), {}),
     }
 
 
@@ -351,15 +419,20 @@ def report(summary: dict, results: list[CaseResult]) -> str:
         return f"{label}: {pct} ({acc['cases_passed']}/{acc['of']} cases)  [{fields}]"
 
     out = [
-        f"Parse accuracy over {summary['ran']} cases "
+        f"Parse accuracy over {summary['scored']} cases "
         f"({summary['skipped']} skipped, {summary['not_run']} not run, "
-        f"{summary['resting']} resting)",
+        f"{summary['resting']} provider failures)",
         line("  end to end", summary["end_to_end"]),
         line("  model only", summary["model_only"]),
-        f"  providers {summary['providers']}, config {summary['config_versions']}",
-        "",
-        "Failures (end to end | model only):",
+        f"  providers {summary['providers']} ({summary['fallbacks']} fallbacks), "
+        f"config {summary['config_versions']}",
+        f"  attempts {summary['attempts']}",
     ]
+    if "tokens" in summary:
+        out.append(
+            f"  tokens {summary['tokens']}, waited {summary['paced_wait_s']:.0f} s for Groq's limit"
+        )
+    out += ["", "Failures (end to end | model only):"]
     for r in results:
         if not r.scored or all(r.passed):
             continue
@@ -369,6 +442,10 @@ def report(summary: dict, results: list[CaseResult]) -> str:
             f"  r{r.row:02d} {r.query!r}: {','.join(e2e) or '-'} | {','.join(model) or '-'}"
             f"  [{r.status}{' ' + str(r.missing) if r.missing else ''}]"
         )
+    resting = [r for r in results if r.status == "ai_resting"]
+    if resting:
+        out += ["", "Provider failures (not scored):"]
+        out += [f"  r{r.row:02d} {r.query!r}: {', '.join(r.attempts)}" for r in resting]
     return "\n".join(out)
 
 
@@ -434,11 +511,11 @@ async def main_async(args) -> int:
     cases = load_cases(args.cases)
     async with httpx.AsyncClient() as http:
         if args.config == "repo":
-            # What ships: llm_understand v1 from 011, understand_prompt v2 from 013, the
+            # What ships: llm_understand v2 from 014, understand_prompt v2 from 013, the
             # seeded areas.
             from tests.understand_support import FakeStore, entries
 
-            store = FakeStore(entries(versions={"llm_understand": 1, "understand_prompt": 2}))
+            store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 2}))
         else:
             if not (_env("SUPABASE_URL") and _env("SUPABASE_SERVICE_KEY")):
                 print(
@@ -456,15 +533,16 @@ async def main_async(args) -> int:
             if all(lf)
             else NullTracer(release=release)
         )
-        llm = CountingLLM(
+        pacer = TokenPacer(
             OpenAICompatibleClient(
                 http,
                 _env("GROQ_API_KEY"),
                 _env("CLOUDFLARE_API_TOKEN"),
                 _env("CLOUDFLARE_ACCOUNT_ID"),
             ),
-            args.max_calls,
+            TOKENS_PER_MINUTE,
         )
+        llm = CountingLLM(pacer, args.max_calls)
         clock = Clock()
         understander = Understander(store, llm, tracer, clock=clock)
         city = await store.city("london")
@@ -473,7 +551,12 @@ async def main_async(args) -> int:
         )
 
         results = await run_cases(cases, understander, llm, clock, city, providers)
-        summary = summarise(results) | {"calls": llm.calls, "max_calls": args.max_calls}
+        summary = summarise(results) | {
+            "calls": llm.calls,
+            "max_calls": args.max_calls,
+            "tokens": dict(pacer.tokens),
+            "paced_wait_s": round(pacer.waited_s, 1),
+        }
         run_id = f"eval-{datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
         summary["run_id"] = run_id
         if all(lf):

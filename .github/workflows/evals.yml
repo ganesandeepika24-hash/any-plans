@@ -28,7 +28,8 @@ concurrency:
 jobs:
   parse:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Groq calls are paced to its 8,000 tokens a minute: about 20 minutes for 71 cases.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: agent

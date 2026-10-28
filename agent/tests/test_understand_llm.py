@@ -79,7 +79,7 @@ async def test_cloudflare_request_goes_to_the_account_endpoint_without_response_
     assert str(request.url) == CLOUDFLARE_URL.format(account_id="acct123")
     assert request.headers["authorization"] == "Bearer cf-test"
     assert body["model"] == "@cf/openai/gpt-oss-20b"
-    assert body["max_tokens"] == 1024
+    assert body["max_tokens"] == 2048
     assert "response_format" not in body and "reasoning_effort" not in body
     # One surrounding code fence is unwrapped; the JSON inside must still validate.
     assert parse_reply(completion.text).keywords == "jazz"

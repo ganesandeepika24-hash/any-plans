@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.6, round 2, making the eval trustworthy
+
+- **The first run's accuracy wasn't what it looked like.** Groq rate-limited 28 of 51 cases, and each fallback spent a second call. The 80-call cap then stopped the run at row 53, so the near-me, ambiguity and chips rows never ran, and 4 rested cases counted as parse failures. The runner had no pacing because the plan assumed requests per minute (30) was the limit. The real limit is tokens per minute (8,000), at about 2,000 tokens a call.
+- **A fix proposed from an unchecked assumption.** The plan said to set `reasoning_effort: low` for Cloudflare. Cloudflare's docs don't confirm that its chat completions endpoint takes that setting, and a third-party config says it doesn't. Caught by checking before writing 014. It raises `max_tokens` instead.
+- **A regression found by a new test.** Leaving resting cases out of the accuracies also dropped the config versions from a run where every case rested. The versions now come from every case that ran.
+- **An untested entry point again.** A deliberate break that turned pacing off in `main()` passed every test, the same gap as the dry-run entry point in step 1.1. A test now runs `main()` and checks the pacer's limits.
+
 ## 2026-10-27: step 1.6, eval set and runner
 
 ### Run results
@@ -9,7 +16,7 @@ Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 | Run | Config | End to end | Model only | Notes |
 |---|---|---|---|---|
 | Offline, perfect model (fake LLM returning the hand-written replies) | repo | 66.2% (47/71) | 100% (71/71) | The resolver ceiling: every failure is a known gap (0014) |
-| First live run | | pending | pending | |
+| First live run (27 Oct, run 40600304576) | supabase | 39.2% (20/51) | 51.0% (26/51) | Not a baseline: 20 cases never ran (call cap), and 4 rested. See 0014, round 2 |
 
 ### What went wrong
 

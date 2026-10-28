@@ -16,7 +16,7 @@ from app.understand.store import ConfigEntry
 from app.understand.tracing import NullTracer, Trace
 
 REPO = Path(__file__).resolve().parents[2]
-MIGRATION_011 = REPO / "db" / "migrations" / "011_understand.sql"
+MIGRATION_014 = REPO / "db" / "migrations" / "014_llm_understand_v2.sql"
 MIGRATION_013 = REPO / "db" / "migrations" / "013_parse_clarify.sql"
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -59,8 +59,9 @@ def london() -> City:
 
 
 def migration_config() -> dict[str, Any]:
-    """llm_understand as migration 011 inserts it, and understand_prompt v2 from 013."""
-    llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_011.read_text(), re.S).group(1)
+    """The active config the migrations ship: llm_understand v2 from 014 and
+    understand_prompt v2 from 013."""
+    llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_014.read_text(), re.S).group(1)
     prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", MIGRATION_013.read_text(), re.S).group(1)
     return {"llm_understand": json.loads(llm), "understand_prompt": {"system": prompt}}
 
