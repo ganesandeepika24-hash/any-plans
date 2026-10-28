@@ -39,22 +39,7 @@ RANGES = DateRanges.model_validate(migration_config()["date_ranges"])
 # What a perfect model still fails end to end today: resolver and calendar gaps, each
 # named in decision 0014. When the resolver learns one, move it out of this list.
 CEILING_FAILURES = {
-    12: ["area"],  # Bloomsbury isn't a seeded area
-    22: ["area"],  # Kentish Town
     23: ["date"],  # "Friday night" starts at 17:00; a weekday is the whole day
-    28: ["area"],  # Hampstead
-    33: ["area"],  # Wembley
-    34: ["area"],  # central London
-    35: ["area"],  # Regent Street
-    36: ["area"],  # Somerset House
-    42: ["area"],  # Golders Green
-    44: ["area"],  # Richmond Park isn't an area name
-    46: ["area"],  # Chinatown
-    52: ["area"],  # Whitechapel
-    53: ["area"],  # Southall
-    55: ["area"],  # the Chelsea Flower Show's venue
-    56: ["area"],  # central London
-    58: ["area"],  # Liverpool Street
 }
 
 
@@ -180,7 +165,7 @@ def test_a_perfect_model_fails_end_to_end_only_on_known_resolver_gaps():
     }
     assert failed == CEILING_FAILURES
     summary = run_evals.summarise(results)
-    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (57, 73)
+    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (72, 73)
 
 
 # Scoring catches mistakes ----------------------------------------------------------
@@ -209,6 +194,7 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         (22, {"who": "Friends"}, "who"),  # no group in the phrase: none to invent
         (25, {"price_change": None}, "budget"),  # "cheaper" missed: the price stays £40
         (26, {"distance_change": "further"}, "radius"),
+        (40, {"place": "Soho"}, "area"),  # "in London" is the default area, not Soho
     ],
     ids=[
         "wrong weekday",
@@ -228,6 +214,7 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         "invented who",
         "cheaper missed",
         "further, not closer",
+        "a place for the default area",
     ],
 )
 def test_a_wrong_reply_fails_that_field_in_both_scores(row, changes, field):
@@ -242,6 +229,13 @@ def test_an_equivalent_when_scores_as_the_same():
     reply = answer(31, when={**WHEN[31], "kind": "date", "weekday": None, "month": 10, "day": 31})
     results, _ = run([BY_ROW[31]], {"groq": [reply], "cloudflare": []})
     assert all(results[0].model_only.values()) and all(results[0].end_to_end.values())
+
+
+@pytest.mark.parametrize("place", [None, "central London", "London"])
+def test_no_place_london_and_central_london_score_as_the_same_area(place):
+    # Row 40 is "Christmas Day things to do in London": the default area (0021).
+    results, _ = run([BY_ROW[40]], {"groq": [answer(40, place=place)], "cloudflare": []})
+    assert results[0].model_only["area"] and results[0].end_to_end["area"]
 
 
 def test_another_spelling_of_the_same_area_scores_as_the_same():
@@ -603,7 +597,7 @@ def test_max_calls_above_80_is_refused():
 def test_the_report_gives_both_numbers_and_the_failures():
     results, _ = run(CASES, perfect(CASES))
     text = run_evals.report(run_evals.summarise(results), results)
-    assert "end to end: 78.1% (57/73 cases)" in text
+    assert "end to end: 98.6% (72/73 cases)" in text
     assert "model only: 100.0% (73/73 cases)" in text
     assert "r23 'Friday night within a mile of Old Street (pin at Old Street)': date | -" in text
 

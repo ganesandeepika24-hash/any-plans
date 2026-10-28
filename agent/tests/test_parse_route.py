@@ -176,7 +176,9 @@ def test_ok_returns_filters_embedding_text_notes_and_ids(harness, token):
 def test_notes_come_back_to_the_client(signing_key, token):
     h = Harness(signing_key, llm=FakeLLM(groq=[reply(place="Narnia")]))
     body = h.post({"query": "things in narnia"}, token).json()
-    assert body["status"] == "ok" and body["filters"] == {}
+    # Narnia isn't found, so the search uses the default area (decision 0021).
+    assert body["status"] == "ok"
+    assert body["filters"] == {"lat": 51.507333, "lon": -0.127654, "radius_km": 10.0}
     assert [n["code"] for n in body["notes"]] == ["unknown_place"]
     assert "Narnia" in body["notes"][0]["message"]
 

@@ -260,7 +260,7 @@ def test_radius_is_the_area_default_unless_stated(place, distance, radius):
 
 
 def test_an_unknown_place_is_a_note_not_a_question():
-    r = run(place="Hampstead")
+    r = run(place="Narnia")  # Hampstead was the example until 0021 seeded it
     assert r.missing == () and [n.code for n in r.notes] == ["unknown_place"]
 
 

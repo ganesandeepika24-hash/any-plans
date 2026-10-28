@@ -47,6 +47,7 @@ NoteCode = Literal[
     "radius_floor",  # refine: "closer" than the smallest radius
     "estimated_date",  # the calendar's date for the event is an estimate (decision 0019)
     "count_capped",  # more recurring days than date_ranges allows (decision 0020)
+    "default_area",  # "London" typed: the default, central London (decision 0021)
 ]
 # The complete list, in the order the app asks.
 Missing = Literal["location", "date", "budget", "price_basis", "event_date", "category"]
@@ -135,6 +136,7 @@ class CalendarDate:
     first: date
     last: date
     estimate: bool = False
+    area_id: str | None = None  # the venue's area, used when no place is named (0021)
 
 
 @dataclass(frozen=True)
@@ -144,6 +146,17 @@ class City:
     tz: ZoneInfo
     areas: tuple[Area, ...]
     calendar: tuple[CalendarDate, ...] = ()
+    # The city's own row (PRD F-04 and M-02): a search with no area, or "central London",
+    # uses this centre and radius. None from a context without them (before 021).
+    centre: Point | None = None
+    default_radius_km: float | None = None
+
+    def area(self, area_id: str) -> Area | None:
+        return next((a for a in self.areas if a.id == area_id), None)
+
+    def is_city(self, place: str) -> bool:
+        """Whether `place` means the city's row, not an area: "London", "central London"."""
+        return normalise(place) in {normalise(self.name), normalise(f"central {self.name}")}
 
     def find_area(self, place: str) -> Area | None:
         wanted = normalise(place)
@@ -203,11 +216,14 @@ def resolve(
     date_choices: tuple[str, ...] = ()
 
     when = understood.when
+    event_area: Area | None = None
     if "date" in understood.unclear:
         missing.add("date")
     elif understood.event is not None and (when is None or when.kind == "weekday"):
         # "Hanukkah", or "Carnival, Sunday": the event's days, or that weekday in them.
         found = city.find_date(understood.event, local_day(now, city.tz))
+        if found is not None and found.area_id is not None:
+            event_area = city.area(found.area_id)
         if found is None:
             missing.add("event_date")  # ask rather than guess (festival-dates rule)
         else:
@@ -245,7 +261,7 @@ def resolve(
         # A vibe or a group is enough to search on: "something chilled" asks nothing.
         missing.add("category")
 
-    used_location = _resolve_place(understood, city, location, fields, notes, missing)
+    used_location = _resolve_place(understood, city, location, fields, notes, missing, event_area)
     _resolve_price(understood, fields, notes, missing)
 
     return Resolution(
@@ -512,31 +528,54 @@ def _resolve_place(
     fields: dict,
     notes: list,
     missing: set,
+    event_area: Area | None = None,
 ) -> bool:
-    """Set the point and radius. A named area wins; then the user's own point (a pin or
-    their location), sent with the request. Returns whether the user's point was used."""
+    """Set the point and radius (decision 0021). In order: a named area; the calendar
+    event's venue area; the user's own point (a pin or their location), sent with the
+    request; then the city's centre and default radius (PRD F-04), which "London" and
+    "central London" also mean (M-02). "Near me" or a distance with no place and no point
+    asks where. Returns whether the user's point was used."""
     place = understood.place
-    if place is not None and normalise(place) == normalise(city.name):
-        place = None  # the whole city: no location filter
-
+    typed_city = place is not None and city.is_city(place)
+    if typed_city:
+        place = None
     area = city.find_area(place) if place is not None else None
-    if place is not None and area is None:
-        notes.append(
-            Note("unknown_place", f"Couldn't find '{place}', so showing all of {city.name}.")
-        )
+    unknown = place is not None and area is None
+    if area is None and place is None:
+        area = event_area
 
+    distance = understood.distance
     if area is not None:
         centre, radius = Point(area.lat, area.lon), area.default_radius_km
     elif location is not None:
         centre, radius = location, LOCATION_RADIUS_KM
-    else:
+        if unknown:
+            notes.append(
+                Note("unknown_place", f"Couldn't find '{place}', so searching around your point.")
+            )
+    elif place is None and (understood.near_me or distance is not None):
         # "Near me" or a bare distance needs a point; don't guess one.
-        if place is None and (understood.near_me or understood.distance is not None):
-            missing.add("location")
+        missing.add("location")
         return False
+    elif city.centre is None:
+        if unknown:  # a context from before 021: no default to fall back on
+            notes.append(
+                Note("unknown_place", f"Couldn't find '{place}', so showing all of {city.name}.")
+            )
+        return False
+    else:
+        centre, radius = city.centre, city.default_radius_km
+        if unknown:
+            notes.append(
+                Note("unknown_place", f"Couldn't find '{place}', so showing central {city.name}.")
+            )
+            distance = None  # it was a distance from the place we couldn't find
+        elif typed_city and not normalise(understood.place).startswith("central "):
+            # "London" or "in London": they may have meant the whole city, so say so.
+            notes.append(Note("default_area", f"Showing central {city.name}."))
 
-    if understood.distance is not None:
-        d = understood.distance
+    if distance is not None:
+        d = distance
         radius = d.value * (KM_PER_MILE if d.unit == "mi" else 1.0)
         if radius > MAX_RADIUS_KM:
             notes.append(
@@ -544,7 +583,7 @@ def _resolve_place(
             )
             radius = MAX_RADIUS_KM
     fields["lat"], fields["lon"], fields["radius_km"] = centre.lat, centre.lon, radius
-    return area is None
+    return centre is location
 
 
 def _resolve_price(understood: UnderstoodQuery, fields: dict, notes: list, missing: set) -> None:

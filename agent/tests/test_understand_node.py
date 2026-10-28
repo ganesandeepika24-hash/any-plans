@@ -169,7 +169,8 @@ async def test_unresolved_parts_come_back_as_notes():
     result = await understander(llm).run("something in narnia on 30 feb")
     assert result.status == "ok"
     assert [n.code for n in result.notes] == ["no_such_date", "unknown_place"]
-    assert result.filters.to_json() == {}
+    # No date, and the default area in place of Narnia (decision 0021).
+    assert result.filters.to_json() == {"lat": 51.507333, "lon": -0.127654, "radius_km": 10.0}
 
 
 # Tracing ----------------------------------------------------------------------------

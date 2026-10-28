@@ -316,3 +316,27 @@ async def test_no_date_ranges_config_rests_without_calling_a_model():
     llm = FakeLLM(groq=[cheaper_text()], cloudflare=[])
     result = await refiner(llm, store).refine("make it cheaper", MUSIC_UNDER_40)
     assert (result.status, llm.calls) == ("ai_resting", [])
+
+
+# The default area (decision 0021) ----------------------------------------------------
+
+CENTRAL = {"lat": CITY.centre.lat, "lon": CITY.centre.lon, "radius_km": CITY.default_radius_km}
+
+
+def test_closer_after_a_default_area_search_narrows_around_the_centre():
+    prior = Prior(WEEKEND | CENTRAL, "live music")
+    f = refine(prior, distance_change="closer").resolution.filters
+    assert (f.lat, f.lon) == (CITY.centre.lat, CITY.centre.lon)
+    assert f.radius_km == pytest.approx(10 / 3)
+
+
+def test_a_search_stored_before_the_default_keeps_no_area():
+    # Rows logged before 0021 have no area; a follow-up that doesn't name one keeps that.
+    f = refine(MUSIC_UNDER_40, price_change="cheaper").resolution.filters
+    assert f.lat is None and f.price_max == 20
+
+
+def test_in_london_as_a_follow_up_moves_to_the_centre_with_a_note():
+    r = refine(COMEDY_IN_SOHO, place="London").resolution
+    assert (r.filters.lat, r.filters.lon, r.filters.radius_km) == tuple(CENTRAL.values())
+    assert [n.code for n in r.notes] == ["default_area"]

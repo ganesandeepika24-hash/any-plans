@@ -30,7 +30,11 @@ def test_case(case):
     result = resolve(understood, datetime.fromisoformat(case["now"]), CITY)
 
     expected = dict(case["expected"])
-    if "area" in expected:
+    if expected.get("area") == "city_centre":  # the default area (decision 0021)
+        expected.pop("area")
+        expected["lat"], expected["lon"] = CITY.centre.lat, CITY.centre.lon
+        expected["radius_km"] = CITY.default_radius_km
+    elif "area" in expected:
         area = AREAS[expected.pop("area")]
         expected["lat"], expected["lon"] = area.lat, area.lon
     got = result.filters.to_json()

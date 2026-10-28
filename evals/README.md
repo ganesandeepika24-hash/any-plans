@@ -13,7 +13,7 @@
 - `expected`: what the product should do, written by hand from the docs, never by running the resolver:
   - `status` and `missing`: the clarify reasons.
   - `date`: a list of acceptable options, each `{window, missing}` (a window of two ISO times, or null for no date filter), or `{unsupported}` for something no filter can express yet.
-  - `area`: `{id}` (a seeded area), `{unseeded}` (a place the product should know but doesn't), `{point}` (the request's location, with `source` when it must be marked device or pin), or null.
+  - `area`: `{id}` (a seeded area), `{city_centre: true}` (the default area: no place, "London" or "central London", resolved from the city's row, decision 0021), `{unseeded}` (a place the product should know but doesn't), `{point}` (the request's location, with `source` when it must be marked device or pin), or null (no location filter, as when the app asks for a location).
   - `budget`: `price_min`, `price_max`, `include_unpriced`. `categories`. `radius_km` (only when stated).
   - `vibe` and `who`: the acceptable values (a list, which may include null), only where they're scored.
 - `unscored`: actions, chips, plan checks, and who or vibe on rows that don't score them, from the docs: recorded, not scored.
