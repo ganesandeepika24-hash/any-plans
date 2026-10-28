@@ -2,6 +2,15 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.4 prep, the API contract
+
+- **`docs/api.md` is the contract for the Lovable front end.** Lovable builds the app's agent calls from it, not from guesses. When an agent route changes, `docs/api.md` changes in the same PR.
+- **Examples are run, not typed.** Every example response came from the real routes with the tests' fakes, and every JSON block was then checked against the Pydantic models with exact field sets.
+- **Three lines in the first draft were wrong, caught by checking them against the code:**
+  - The cap counting was "requests that reach the model". An `unavailable` rest calls no model but still counts.
+  - The draft told the app to show "Showing central London." when no place was given. The agent sends that note only when "London" is typed. It's now listed as a gap, so the app doesn't guess from coordinates.
+  - The draft used Diwali as the `estimated_date` example, but the seed doesn't mark Diwali as estimated.
+
 ## 2026-10-28: stage 1 step 5, London areas (decision 0021)
 
 - **I asked about choices the owner's decisions covered.** The first plan asked about landmarks and venue areas and deferred the F-04 default. All three were in `claude/step-5-areas-decisions.md`, which I couldn't see until it was pasted. The plan was redone from it.
