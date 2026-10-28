@@ -46,6 +46,7 @@ class FakeQueryLog:
         self.fail_count = False
         self.fail_write = False
         self.fail_results = False
+        self.fail_get = False
 
     async def count_today(self, user_id, since):
         if self.fail_count:
@@ -66,6 +67,14 @@ class FakeQueryLog:
         # query_results references queries: the row must already be there.
         assert all(r["query_id"] in {q["id"] for q in self.rows} for r in rows)
         self.results.extend(rows)
+
+    async def get_own(self, query_id, user_id):
+        if self.fail_get:
+            raise QueryLogError("couldn't read the earlier query: ConnectError")
+        return next(
+            (r for r in self.rows if r["id"] == str(query_id) and r["user_id"] == str(user_id)),
+            None,
+        )
 
     def preload(self, n, status="ok", user=USER):
         for _ in range(n):

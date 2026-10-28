@@ -94,9 +94,9 @@ def test_the_set_has_73_synthetic_rows_in_order():
     assert {c["now"] for c in CASES} == {"2026-10-27T12:00:00+00:00"}
 
 
-def test_only_the_refine_rows_are_skipped():
-    skipped = {c["row"]: c["skip"] for c in CASES if c["skip"]}
-    assert skipped == {25: "needs_prior_filters", 26: "needs_prior_filters"}
+def test_no_rows_are_skipped_and_the_refine_rows_carry_their_earlier_search():
+    assert [c["row"] for c in CASES if c["skip"]] == []
+    assert sorted(c["row"] for c in CASES if c.get("prior")) == [25, 26]  # decision 0018
 
 
 def test_pin_rows_score_date_and_radius_only():
@@ -107,9 +107,9 @@ def test_pin_rows_score_date_and_radius_only():
 
 def test_radius_is_scored_only_where_the_user_states_one():
     for c in CASES:
-        stated = c["reply"]["distance"] is not None
-        assert ("radius" in c["scored"]) == stated, c["id"]
-        assert (c["expected"]["radius_km"] is not None) == stated, c["id"]
+        stated = c["reply"]["distance"] is not None or c["reply"].get("distance_change")
+        assert ("radius" in c["scored"]) == bool(stated), c["id"]
+        assert (c["expected"]["radius_km"] is not None) == bool(stated), c["id"]
 
 
 def test_expectations_are_well_formed():
@@ -170,7 +170,7 @@ def test_a_perfect_model_scores_100_percent_model_only():
     results, _ = run(CASES, perfect(CASES))
     summary = run_evals.summarise(results)
     assert summary["model_only"]["accuracy"] == 1.0
-    assert summary["ran"] == 71 and summary["skipped"] == 2
+    assert summary["ran"] == 73 and summary["skipped"] == 0
 
 
 def test_a_perfect_model_fails_end_to_end_only_on_known_resolver_gaps():
@@ -182,7 +182,7 @@ def test_a_perfect_model_fails_end_to_end_only_on_known_resolver_gaps():
     }
     assert failed == CEILING_FAILURES
     summary = run_evals.summarise(results)
-    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (47, 71)
+    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (49, 73)
 
 
 # Scoring catches mistakes ----------------------------------------------------------
@@ -209,6 +209,8 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         (3, {"vibe": "Lively"}, "vibe"),
         (4, {"who": "Friends"}, "who"),
         (22, {"who": "Friends"}, "who"),  # no group in the phrase: none to invent
+        (25, {"price_change": None}, "budget"),  # "cheaper" missed: the price stays £40
+        (26, {"distance_change": "further"}, "radius"),
     ],
     ids=[
         "wrong weekday",
@@ -226,6 +228,8 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         "wrong vibe",
         "wrong who",
         "invented who",
+        "cheaper missed",
+        "further, not closer",
     ],
 )
 def test_a_wrong_reply_fails_that_field_in_both_scores(row, changes, field):
@@ -505,7 +509,7 @@ def test_the_run_stops_before_passing_the_cap():
     results, llm = run(CASES, perfect(CASES), max_calls=5)
     assert llm.calls == 5
     assert sum(r.scored for r in results) == 5
-    assert run_evals.summarise(results)["not_run"] == 73 - 2 - 5
+    assert run_evals.summarise(results)["not_run"] == 73 - 5
 
 
 def test_fallbacks_count_and_a_case_never_starts_without_room_for_them():
@@ -597,8 +601,8 @@ def test_max_calls_above_80_is_refused():
 def test_the_report_gives_both_numbers_and_the_failures():
     results, _ = run(CASES, perfect(CASES))
     text = run_evals.report(run_evals.summarise(results), results)
-    assert "end to end: 66.2% (47/71 cases)" in text
-    assert "model only: 100.0% (71/71 cases)" in text
+    assert "end to end: 67.1% (49/73 cases)" in text
+    assert "model only: 100.0% (73/73 cases)" in text
     assert "r68 '14 to 15 November, Shoreditch': date | -" in text
 
 

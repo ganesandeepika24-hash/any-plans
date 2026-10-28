@@ -5,9 +5,10 @@ Usage, from agent/ (so the agent's environment and packages are used):
     uv run python ../evals/run_evals.py [--config supabase|repo] [--out PATH]
 
 Each case runs with "now" frozen at its `now` (27 Oct 2026 12:00 London) and its
-`location`, if any. Rows tagged with a `skip` reason (refine rows that need the prior
-filters) don't run. The run stops starting cases before it could pass MAX_CALLS provider
-calls, so it never spends more than that.
+`location`, if any. Rows with a `prior` (refine rows 25 and 26) run the Refine step on
+that earlier search's stored filters instead (decision 0018). Rows tagged with a `skip`
+reason don't run; none are, now. The run stops starting cases before it could pass
+MAX_CALLS provider calls, so it never spends more than that.
 
 Two scores per case, over the fields it lists in `scored` (date, area, budget, category,
 radius only when the user stated one, and vibe and who on the rows that test them):
@@ -60,6 +61,7 @@ sys.path.insert(0, str(REPO / "agent"))
 import httpx  # noqa: E402
 from app.understand.llm import Completion, LLMError, OpenAICompatibleClient, Usage  # noqa: E402
 from app.understand.node import Understander, UnderstandResult  # noqa: E402
+from app.understand.refine import Prior  # noqa: E402
 from app.understand.resolve import (  # noqa: E402
     KM_PER_MILE,
     AmbiguousDate,
@@ -68,7 +70,7 @@ from app.understand.resolve import (  # noqa: E402
     date_window,
     normalise,
 )
-from app.understand.schema import UnderstoodQuery, When  # noqa: E402
+from app.understand.schema import RefineReply, UnderstoodQuery, When  # noqa: E402
 from app.understand.store import SupabaseStore  # noqa: E402
 from app.understand.tracing import LangfuseTracer, NullTracer  # noqa: E402
 
@@ -103,7 +105,7 @@ SCORES_PATH = "/api/public/scores"
 def load_cases(path: Path = CASES) -> list[dict[str, Any]]:
     cases = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     for c in cases:
-        UnderstoodQuery.model_validate(c["reply"])  # a bad hand-written reply is a bug
+        _model(c).model_validate(c["reply"])  # a bad hand-written reply is a bug
         unknown = set(c["scored"]) - set(FIELDS)
         if unknown:
             raise ValueError(f"{c['id']}: unknown scored fields {unknown}")
@@ -186,7 +188,7 @@ def score_model(case: dict, got: UnderstoodQuery | None, city: City) -> dict[str
     if got is None:
         return {f: False for f in case["scored"]}
     variants = [
-        UnderstoodQuery.model_validate(case["reply"] | extra)
+        _model(case).model_validate(case["reply"] | extra)
         for extra in [{}, *case.get("also_accept", [])]
     ]
     now = _moment(case["now"])
@@ -205,12 +207,14 @@ def _same(name: str, a: UnderstoodQuery, b: UnderstoodQuery, now: datetime, city
         case "area":
             return (a.near_me, _place(a.place, city)) == (b.near_me, _place(b.place, city))
         case "budget":
-            return _budget(a) == _budget(b)
+            return _budget(a) == _budget(b) and _change(a, "price") == _change(b, "price")
         case "category":
             if a.categories or b.categories:
                 return set(a.categories or []) == set(b.categories or [])
             return ("category" in a.unclear) == ("category" in b.unclear)
         case "radius":
+            if _change(a, "distance") != _change(b, "distance"):
+                return False
             ka, kb = _km(a), _km(b)
             if ka is None or kb is None:
                 return ka is kb
@@ -235,6 +239,16 @@ def _place(place: str | None, city: City) -> str | None:
         return None
     area = city.find_area(place)
     return area.id if area else normalise(place)
+
+
+def _model(case: dict) -> type[UnderstoodQuery]:
+    """A refine row's reply is a RefineReply: the follow-up's changes (decision 0018)."""
+    return RefineReply if case.get("prior") else UnderstoodQuery
+
+
+def _change(q: UnderstoodQuery, kind: str) -> str | None:
+    """A refine reply's relative change ("cheaper", "closer"); None for a search."""
+    return getattr(q, f"{kind}_change", None)
 
 
 def _budget(q: UnderstoodQuery):
@@ -417,8 +431,12 @@ async def run_cases(
             continue
         clock.now = _moment(case["now"])
         loc = case.get("location")
+        point = Point(**loc) if loc else None
         try:
-            result = await understander.run(case["query"], Point(**loc) if loc else None)
+            if case.get("prior"):  # a refine row: the earlier search, changed (0018)
+                result = await understander.refine(case["query"], Prior(**case["prior"]), point)
+            else:
+                result = await understander.run(case["query"], point)
         except RateLimitStop as exc:
             stopped = str(exc)
             print(f"Stopped at r{case['row']:02d}: {stopped}", file=sys.stderr)

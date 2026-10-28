@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from datetime import time as clock_time
@@ -26,7 +27,14 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.querylog import QueryLog, QueryLogError
-from app.understand.node import AI_RESTING, MAX_QUERY_CHARS, Understander, stored_filters
+from app.understand.node import (
+    AI_RESTING,
+    MAX_QUERY_CHARS,
+    Understander,
+    UnderstandResult,
+    stored_filters,
+)
+from app.understand.refine import Prior
 from app.understand.resolve import LocationSource, Point
 from app.understand.store import Store, StoreError
 
@@ -36,7 +44,7 @@ CAP_KEY = "ai_search_cap"
 CAPPED = "Daily AI search limit reached; filters still work"
 
 Reason = Literal["providers", "daily_cap", "unavailable"]
-Route = Literal["parse", "search"]  # queries.route (migrations 002 and 016)
+Route = Literal["parse", "search", "refine"]  # queries.route (migrations 002, 016, 018)
 
 
 class CapConfig(BaseModel):
@@ -141,6 +149,33 @@ class Parser:
     ) -> ParseOutcome:
         """`route` names the endpoint on the queries row: /search runs this same step
         first, under the same cap."""
+        return await self._handle(
+            user_id, query, location, route, lambda point: self._understander.run(query, point)
+        )
+
+    async def refine(
+        self, user_id: UUID, prior_id: UUID, prior: Prior, message: str, location: Location | None
+    ) -> ParseOutcome:
+        """A follow-up to the user's earlier query `prior_id` (decision 0018), under the
+        same cap. The caller has read `prior` from that user's own row."""
+        return await self._handle(
+            user_id,
+            message,
+            location,
+            "refine",
+            lambda point: self._understander.refine(message, prior, point),
+            refines=prior_id,
+        )
+
+    async def _handle(
+        self,
+        user_id: UUID,
+        query: str,
+        location: Location | None,
+        route: Route,
+        understand: Callable[[Point | None], Awaitable[UnderstandResult]],
+        refines: UUID | None = None,
+    ) -> ParseOutcome:
         started = self._monotonic()
         query_id = uuid4()
         day = self._clock().astimezone(UTC).date()
@@ -154,12 +189,27 @@ class Parser:
             except (StoreError, QueryLogError, ValidationError, KeyError) as exc:
                 log.warning("daily cap unavailable: %s", exc)
                 return self._resting(
-                    query_id, user_id, query, started, route, "unavailable", AI_RESTING
+                    query_id,
+                    user_id,
+                    query,
+                    started,
+                    route,
+                    "unavailable",
+                    AI_RESTING,
+                    refines=refines,
                 )
             cap_versions = {CAP_KEY: entry.version}
             if used + self._pending[(user_id, day)] >= cap:
                 return self._resting(
-                    query_id, user_id, query, started, route, "daily_cap", CAPPED, cap_versions
+                    query_id,
+                    user_id,
+                    query,
+                    started,
+                    route,
+                    "daily_cap",
+                    CAPPED,
+                    cap_versions,
+                    refines=refines,
                 )
             self._pending[(user_id, day)] += 1
         reservation = (user_id, day)
@@ -168,7 +218,7 @@ class Parser:
             point = (
                 Point(location.lat, location.lon, location.source) if location is not None else None
             )
-            result = await self._understander.run(query, point)
+            result = await understand(point)
         except BaseException:
             self._release_reservation(reservation)
             raise
@@ -176,9 +226,7 @@ class Parser:
         notes = [NoteOut(**asdict(n)) for n in result.notes]
         filters = result.filters.to_json() if result.filters else None
         missing = list(result.missing)
-        understood = result.understood
-        vibe = understood.vibe if understood else None
-        who = understood.who if understood else None
+        vibe, who = result.vibe, result.who
         reason: Reason | None = None
         if result.status == "ai_resting":
             reason = "providers" if result.attempts else "unavailable"
@@ -227,6 +275,7 @@ class Parser:
             missing=missing,
             config_versions=result.config_versions | cap_versions,
             trace_id=result.trace_id,
+            refines=refines,
         )
         return ParseOutcome(response, row, reservation)
 
@@ -256,6 +305,7 @@ class Parser:
         reason: Reason,
         message: str,
         config_versions: dict[str, int] | None = None,
+        refines: UUID | None = None,
     ) -> ParseOutcome:
         response = ParseResponse(
             status="ai_resting", reason=reason, message=message, query_id=query_id
@@ -269,6 +319,7 @@ class Parser:
             route=route,
             status=status,
             config_versions=config_versions or {},
+            refines=refines,
         )
         return ParseOutcome(response, row, None)
 
@@ -291,9 +342,10 @@ class Parser:
         missing: list[str] | None = None,
         config_versions: dict[str, int],
         trace_id: str | None = None,
+        refines: UUID | None = None,
     ) -> dict[str, Any]:
-        """A queries row (migration 002, plus missing from 013 and vibe and who from 015;
-        columns proposed in 0013)."""
+        """A queries row (migration 002, plus missing from 013, vibe and who from 015 and
+        refines from 018; columns proposed in 0013)."""
         return {
             "id": str(query_id),
             "user_id": str(user_id),
@@ -312,5 +364,6 @@ class Parser:
             "config_versions": config_versions,
             "release": self._release,
             "trace_id": trace_id,
+            "refines": str(refines) if refines else None,  # the query a refine changed
             "latency_ms": int((self._monotonic() - started) * 1000),
         }

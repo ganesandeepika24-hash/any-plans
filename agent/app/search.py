@@ -1,4 +1,5 @@
-"""POST /search: the Understand step, then the Search node (stage 1 step 1, decision 0016).
+"""POST /search and POST /refine: the Understand or Refine step, then the Search node
+(stage 1 steps 1 and 2, decisions 0016 and 0018).
 
 1. The parser runs as for /parse, under the same daily cap, and writes a queries row
    with route 'search'.
@@ -7,7 +8,9 @@
 3. The Search node embeds the search text (in process, fastembed) and calls search_items
    (migration 010) with the filters. vibe and who aren't passed: search_items takes only
    SearchFilters' keys and rejects others (decision 0015).
-4. The events shown are logged to query_results by source and source_id (decision 0007),
+4. /refine reads the user's own earlier queries row first, and runs the Refine step on
+   its filters instead of Understand. Everything after that is the same.
+5. The events shown are logged to query_results by source and source_id (decision 0007),
    after the queries row. The user's location is in neither: queries keeps filters
    without the user's own point, and query_results holds no distances.
 """
@@ -25,6 +28,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.parse import Location, ParseOutcome, Parser, ParseResponse
 from app.querylog import QueryLog, QueryLogError
+from app.understand.refine import Prior
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +38,14 @@ SEARCH_UNAVAILABLE = "Search is unavailable right now. Try again in a moment."
 
 class SearchError(Exception):
     pass
+
+
+class PriorNotFound(Exception):
+    """No such query, or it's another user's: the same answer for both."""
+
+
+class PriorNotRefinable(Exception):
+    """The earlier query didn't resolve (it asked a question, rested or was capped)."""
 
 
 class SearchBackend(Protocol):
@@ -176,6 +188,23 @@ class Searcher:
         self, user_id: UUID, query: str, location: Location | None = None
     ) -> SearchOutcome:
         parsed = await self._parser.parse(user_id, query, location, route="search")
+        return await self._searched(parsed)
+
+    async def refine(
+        self, user_id: UUID, prior_id: UUID, message: str, location: Location | None = None
+    ) -> SearchOutcome:
+        """The user's earlier query, changed by `message`, then searched (decision 0018).
+        Raises PriorNotFound, PriorNotRefinable or QueryLogError before any model call."""
+        row = await self._log.get_own(prior_id, user_id)
+        if row is None:
+            raise PriorNotFound(prior_id)
+        if row["status"] != "ok" or row["filters"] is None:
+            raise PriorNotRefinable(row["status"])
+        prior = Prior(row["filters"], row["embedding_text"], row.get("vibe"), row.get("who"))
+        parsed = await self._parser.refine(user_id, prior_id, prior, message, location)
+        return await self._searched(parsed)
+
+    async def _searched(self, parsed: ParseOutcome) -> SearchOutcome:
         response = SearchResponse(**parsed.response.model_dump())
         if response.status != "ok":
             return SearchOutcome(response, parsed)  # never searched: answer like /parse

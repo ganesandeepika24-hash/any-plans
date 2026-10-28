@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: stage 1 step 2, refine (decision 0018)
+
+- **The security filter had no test.** A deliberate break that dropped the `user_id` filter from the real query log's own-row read passed every test, because only the fake log was exercised. That filter is the only thing stopping one user from refining another's query (the service key bypasses RLS). It now has a request-level test.
+- **A test that couldn't see the status check.** The 409 test gave every unfinished query no filters, so the "no filters" guard caught them all and the status check was never exercised. A `needs_clarification` row does keep partial filters (013), and the test now uses one.
+- **The same invalid-route trap, caught before pushing this time.** 018 makes `refine` valid, and two tests used it as an invalid route. Found by searching for the value before running anything. The jobs suite was run against a migrated database before pushing.
+- **Leftover scaffolding in a first draft.** The first `refine.py` ended with an unused helper and a padded `__all__` that only kept unused imports quiet. Removed before the first test run.
+
 ## 2026-10-28: near me (decision 0017)
 
 - **I waited on a PR that had already merged.** I told the owner #21 was waiting for approval, but they had merged it. Check `gh pr view` or `origin/main` before saying a PR is open.

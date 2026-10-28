@@ -33,6 +33,9 @@ NoteCode = Literal[
     "no_such_date",
     "radius_capped",
     "price_range_inverted",
+    "already_free",  # refine: "cheaper" than free (decision 0018)
+    "no_price_limit",  # refine: "can spend more" with no price limit to raise
+    "radius_floor",  # refine: "closer" than the smallest radius
 ]
 # The complete list, in the order the app asks.
 Missing = Literal["location", "date", "budget", "price_basis", "event_date", "category"]

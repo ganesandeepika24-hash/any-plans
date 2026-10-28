@@ -18,24 +18,24 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import cache
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.understand.clarify import Question, questions
 from app.understand.llm import LLMClient, LLMConfig, LLMError, schema_instruction
-from app.understand.resolve import LocationSource, Missing, Note, Point, resolve
-from app.understand.schema import SearchFilters, UnderstoodQuery, strict_json_schema
+from app.understand.refine import STEPS_KEY, Prior, RefineSteps, apply
+from app.understand.resolve import City, LocationSource, Missing, Note, Point, Resolution, resolve
+from app.understand.schema import RefineReply, SearchFilters, UnderstoodQuery, strict_json_schema
 from app.understand.store import Store, StoreError
 from app.understand.tracing import Tracer, now_ns
 
-CONFIG_KEYS = ("llm_understand", "understand_prompt")
 MAX_QUERY_CHARS = 500
 AI_RESTING = "AI search is resting; filters still work"
 # One surrounding Markdown code fence is unwrapped; any other text around the JSON
 # makes the reply invalid.
 _FENCED = re.compile(r"```(?:json)?\s*\n(?P<body>.*)\n\s*```", re.S)
-_SCHEMA = strict_json_schema(UnderstoodQuery)
 
 
 class PromptConfig(BaseModel):
@@ -62,7 +62,9 @@ class UnderstandResult:
     questions: tuple[Question, ...] = ()
     used_location: bool = False  # filters' lat and lon are the user's own point
     location_source: LocationSource | None = None  # device or pin, when that point was used
-    understood: UnderstoodQuery | None = None
+    vibe: str | None = None  # the search's, or for a refine the follow-up's or the earlier one's
+    who: str | None = None
+    understood: UnderstoodQuery | None = None  # the model's reply (a RefineReply for a refine)
     provider: str | None = None
     attempts: list[Attempt] = field(default_factory=list)
     config_versions: dict[str, int] = field(default_factory=dict)
@@ -70,8 +72,8 @@ class UnderstandResult:
     trace_id: str | None = None  # the Langfuse trace, for queries.trace_id
 
 
-def parse_reply(text: str) -> UnderstoodQuery:
-    """Strict: a JSON object (optionally in one code fence) that validates."""
+def parse_reply[M: UnderstoodQuery](text: str, model: type[M] = UnderstoodQuery) -> M:
+    """Strict: a JSON object (optionally in one code fence) that validates as `model`."""
     body = text.strip()
     fenced = _FENCED.fullmatch(body)
     if fenced:
@@ -81,10 +83,10 @@ def parse_reply(text: str) -> UnderstoodQuery:
     except ValueError as exc:
         raise LLMError("invalid_json", "reply isn't JSON") from exc
     try:
-        return UnderstoodQuery.model_validate_json(body)
+        return model.model_validate_json(body)
     except ValidationError as exc:
         fields = sorted({".".join(str(p) for p in e["loc"]) or "(root)" for e in exc.errors()})
-        raise LLMError("schema", f"reply fails UnderstoodQuery at {fields}") from exc
+        raise LLMError("schema", f"reply fails {model.__name__} at {fields}") from exc
 
 
 class Understander:
@@ -103,11 +105,22 @@ class Understander:
         self._clock = clock
 
     async def run(self, query: str, location: Point | None = None) -> UnderstandResult:
-        query = query.strip()
-        if not query or len(query) > MAX_QUERY_CHARS:
-            raise ValueError(f"query must be 1 to {MAX_QUERY_CHARS} characters")
+        """A search: free text in, filters out."""
+        query = _checked(query)
         trace = self._tracer.start("understand", {"query": query})
         result = await self._run(query, location, trace)
+        return await self._finish(result, trace)
+
+    async def refine(
+        self, message: str, prior: Prior, location: Point | None = None
+    ) -> UnderstandResult:
+        """A follow-up to an earlier search (decision 0018): the earlier filters, changed."""
+        message = _checked(message)
+        trace = self._tracer.start("refine", {"query": message, "prior": prior.filters})
+        result = await self._refine(message, prior, location, trace)
+        return await self._finish(result, trace)
+
+    async def _finish(self, result: UnderstandResult, trace) -> UnderstandResult:
         result.trace_id = trace.trace_id
         trace.finish(
             output={
@@ -129,21 +142,57 @@ class Understander:
         return result
 
     async def _run(self, query: str, location: Point | None, trace) -> UnderstandResult:
+        result, city, understood = await self._ask(
+            query, trace, "understand_prompt", UnderstoodQuery, "understand"
+        )
+        if understood is None:
+            return result
+        resolution = resolve(understood, self._clock(), city, location)
+        return _resolved(result, understood, resolution, city, understood.vibe, understood.who)
+
+    async def _refine(
+        self, message: str, prior: Prior, location: Point | None, trace
+    ) -> UnderstandResult:
         try:
-            entries = await self._store.config(CONFIG_KEYS)
-            versions = {k: entries[k].version for k in CONFIG_KEYS}
-            llm_config = LLMConfig.model_validate(entries["llm_understand"].value)
-            prompt = PromptConfig.model_validate(entries["understand_prompt"].value)
-            city = await self._store.city(self._city_id)
+            entry = (await self._store.config((STEPS_KEY,)))[STEPS_KEY]
+            steps = RefineSteps.model_validate(entry.value)
         except (StoreError, ValidationError, KeyError) as exc:
             return UnderstandResult("ai_resting", message=f"{AI_RESTING} (config: {exc})")
+        result, city, reply = await self._ask(
+            message, trace, "refine_prompt", RefineReply, "refine"
+        )
+        result.config_versions[STEPS_KEY] = entry.version
+        if reply is None:
+            return result
+        refined = apply(prior, reply, self._clock(), city, steps, location)
+        return _resolved(result, reply, refined.resolution, city, refined.vibe, refined.who)
+
+    async def _ask[M: UnderstoodQuery](
+        self, query: str, trace, prompt_key: str, model: type[M], name: str
+    ) -> tuple[UnderstandResult, City | None, M | None]:
+        """Each provider in turn, until one gives a reply that validates as `model`.
+        Returns the result so far (attempts, versions), the city, and the reply or None."""
+        keys = ("llm_understand", prompt_key)
+        try:
+            entries = await self._store.config(keys)
+            versions = {k: entries[k].version for k in keys}
+            llm_config = LLMConfig.model_validate(entries["llm_understand"].value)
+            prompt = PromptConfig.model_validate(entries[prompt_key].value)
+            city = await self._store.city(self._city_id)
+        except (StoreError, ValidationError, KeyError) as exc:
+            return (
+                UnderstandResult("ai_resting", message=f"{AI_RESTING} (config: {exc})"),
+                None,
+                None,
+            )
 
         result = UnderstandResult("ai_resting", config_versions=versions, message=AI_RESTING)
+        json_schema = _schema(model)
         for provider in llm_config.providers:
             system = prompt.system
-            schema = _SCHEMA if provider.structured else None
+            schema = json_schema if provider.structured else None
             if not provider.structured:
-                system += schema_instruction(_SCHEMA)
+                system += schema_instruction(json_schema)
             started = now_ns()
             text: str | None = None
             usage: dict[str, Any] = {}
@@ -154,7 +203,7 @@ class Understander:
                     "input": completion.usage.input_tokens,
                     "output": completion.usage.output_tokens,
                 }
-                understood = parse_reply(completion.text)
+                reply = parse_reply(completion.text, model)
             except LLMError as exc:
                 usage = usage or {
                     "input": exc.usage.input_tokens,
@@ -164,7 +213,7 @@ class Understander:
                     Attempt(provider.provider, provider.model, exc.outcome, str(exc))
                 )
                 trace.generation(
-                    name=f"understand.{provider.provider}",
+                    name=f"{name}.{provider.provider}",
                     model=provider.model,
                     start_ns=started,
                     input=_messages(system, query),
@@ -177,7 +226,7 @@ class Understander:
 
             result.attempts.append(Attempt(provider.provider, provider.model, "ok"))
             trace.generation(
-                name=f"understand.{provider.provider}",
+                name=f"{name}.{provider.provider}",
                 model=provider.model,
                 start_ns=started,
                 input=_messages(system, query),
@@ -185,20 +234,44 @@ class Understander:
                 usage=usage,
                 metadata=_attempt_metadata(provider.provider, "ok", versions),
             )
-            resolution = resolve(understood, self._clock(), city, location)
-            result.status = "needs_clarification" if resolution.missing else "ok"
-            result.message = None
             result.provider = provider.provider
-            result.understood = understood
-            result.filters = resolution.filters
-            result.query_text = resolution.query_text
-            result.notes = resolution.notes
-            result.missing = resolution.missing
-            result.questions = questions(resolution.missing, understood, city.name)
-            result.used_location = resolution.used_location
-            result.location_source = resolution.location_source
-            break
-        return result
+            return result, city, reply
+        return result, city, None
+
+
+@cache
+def _schema(model: type[UnderstoodQuery]) -> dict[str, Any]:
+    """Built once per reply model, as the module-level schema was before refine."""
+    return strict_json_schema(model)
+
+
+def _checked(query: str) -> str:
+    query = query.strip()
+    if not query or len(query) > MAX_QUERY_CHARS:
+        raise ValueError(f"query must be 1 to {MAX_QUERY_CHARS} characters")
+    return query
+
+
+def _resolved(
+    result: UnderstandResult,
+    understood: UnderstoodQuery,
+    resolution: Resolution,
+    city: City,
+    vibe: str | None,
+    who: str | None,
+) -> UnderstandResult:
+    result.status = "needs_clarification" if resolution.missing else "ok"
+    result.message = None
+    result.understood = understood
+    result.filters = resolution.filters
+    result.query_text = resolution.query_text
+    result.notes = resolution.notes
+    result.missing = resolution.missing
+    result.questions = questions(resolution.missing, understood, city.name)
+    result.used_location = resolution.used_location
+    result.location_source = resolution.location_source
+    result.vibe, result.who = vibe, who
+    return result
 
 
 def stored_filters(result: UnderstandResult) -> dict[str, Any] | None:

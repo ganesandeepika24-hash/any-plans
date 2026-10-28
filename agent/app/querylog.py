@@ -1,8 +1,9 @@
 """The queries table through PostgREST with the service key (migration 002, decision 0013).
 
 count_today backs the daily cap; write records one row per request. write_results
-records the events /search showed (query_results), after their queries row. /parse
-shows no events, so it writes none.
+records the events /search and /refine showed (query_results), after their queries row.
+/parse shows no events, so it writes none. get_own reads a user's own earlier row, for
+/refine.
 """
 
 from datetime import datetime
@@ -27,6 +28,10 @@ class QueryLog(Protocol):
     async def write(self, row: dict[str, Any]) -> None: ...
 
     async def write_results(self, rows: list[dict[str, Any]]) -> None: ...
+
+    async def get_own(self, query_id: UUID, user_id: UUID) -> dict[str, Any] | None:
+        """The queries row `query_id` if it belongs to `user_id`, else None."""
+        ...
 
 
 class SupabaseQueryLog:
@@ -67,6 +72,26 @@ class SupabaseQueryLog:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise QueryLogError(f"couldn't write the queries row: {type(exc).__name__}") from exc
+
+    async def get_own(self, query_id: UUID, user_id: UUID) -> dict[str, Any] | None:
+        # The service key bypasses RLS, so the user filter is what keeps one user from
+        # refining another's query (decision 0018).
+        try:
+            response = await self._http.get(
+                self._url,
+                params={
+                    "select": "id,status,filters,embedding_text,vibe,who",
+                    "id": f"eq.{query_id}",
+                    "user_id": f"eq.{user_id}",
+                },
+                headers=self._headers(),
+                timeout=TIMEOUT_S,
+            )
+            response.raise_for_status()
+            rows = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise QueryLogError(f"couldn't read the earlier query: {type(exc).__name__}") from exc
+        return rows[0] if rows else None
 
     async def write_results(self, rows: list[dict[str, Any]]) -> None:
         try:
