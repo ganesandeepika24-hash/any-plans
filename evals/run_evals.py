@@ -10,7 +10,7 @@ filters) don't run. The run stops starting cases before it could pass MAX_CALLS 
 calls, so it never spends more than that.
 
 Two scores per case, over the fields it lists in `scored` (date, area, budget, category,
-and radius only when the user stated one):
+radius only when the user stated one, and vibe and who on the rows that test them):
 
 - end to end: the filters and clarify reasons the node produced, against `expected`,
   which says what the product should do. Resolver gaps (months, ranges, unseeded
@@ -77,13 +77,15 @@ MAX_CALLS = 80
 TOKENS_PER_MINUTE = {"groq": 7200}
 FIRST_CALL_TOKENS = 2500  # a guess for the first call, before any usage is known
 RADIUS_TOLERANCE_KM = 0.8  # about half a mile (seed doc)
-FIELDS = ("date", "area", "budget", "category", "radius")
+FIELDS = ("date", "area", "budget", "category", "radius", "vibe", "who")
 REASONS = {
     "date": {"date", "event_date"},
     "area": {"location"},
     "budget": {"budget", "price_basis"},
     "category": {"category"},
     "radius": set(),
+    "vibe": set(),
+    "who": set(),
 }
 SCORES_PATH = "/api/public/scores"
 
@@ -147,6 +149,9 @@ def score_end_to_end(case: dict, result: UnderstandResult, city: City) -> dict[s
                     f.radius_km is not None
                     and abs(f.radius_km - exp["radius_km"]) <= RADIUS_TOLERANCE_KM
                 )
+            case "vibe" | "who":
+                # Beside the filters, as the parse route returns them; any listed value.
+                out[name] = getattr(result.understood, name) in exp[name]
     return out
 
 
@@ -198,6 +203,8 @@ def _same(name: str, a: UnderstoodQuery, b: UnderstoodQuery, now: datetime, city
             if ka is None or kb is None:
                 return ka is kb
             return abs(ka - kb) <= RADIUS_TOLERANCE_KM
+        case "vibe" | "who":
+            return getattr(a, name) == getattr(b, name)
     raise ValueError(name)
 
 
@@ -511,11 +518,11 @@ async def main_async(args) -> int:
     cases = load_cases(args.cases)
     async with httpx.AsyncClient() as http:
         if args.config == "repo":
-            # What ships: llm_understand v2 from 014, understand_prompt v2 from 013, the
+            # What ships: llm_understand v2 from 014, understand_prompt v3 from 015, the
             # seeded areas.
             from tests.understand_support import FakeStore, entries
 
-            store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 2}))
+            store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 3}))
         else:
             if not (_env("SUPABASE_URL") and _env("SUPABASE_SERVICE_KEY")):
                 print(

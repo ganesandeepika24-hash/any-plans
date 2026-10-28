@@ -5,12 +5,14 @@ import asyncio
 import importlib.util
 import json
 from datetime import datetime
+from typing import get_args
 
 import httpx
 import pytest
 
 from app.understand.llm import LLMError
 from app.understand.node import Understander
+from app.understand.schema import Vibe, Who
 from tests.understand_support import (
     REPO,
     FakeLLM,
@@ -63,7 +65,7 @@ CEILING_FAILURES = {
 def run(cases, script, max_calls=80, providers=1, tracer=None):
     llm = run_evals.CountingLLM(FakeLLM(**script), max_calls)
     clock = run_evals.Clock()
-    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 2}))
+    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 3}))
     if providers == 1:
         store.entries["llm_understand"].value["providers"] = store.entries["llm_understand"].value[
             "providers"
@@ -124,6 +126,12 @@ def test_expectations_are_well_formed():
                 assert start.utcoffset() is not None and start < end, c["id"]
         if exp["area"] and "id" in exp["area"]:
             assert exp["area"]["id"] in area_ids, c["id"]
+        for name, allowed in (("vibe", get_args(Vibe)), ("who", get_args(Who))):
+            # Scored exactly where expected lists the right values, the reply's among them.
+            assert (name in c["scored"]) == (name in exp), c["id"]
+            if name in exp:
+                assert exp[name] and set(exp[name]) <= {*allowed, None}, c["id"]
+                assert c["reply"][name] in exp[name], c["id"]
         assert c["uc"] is None or c["uc"].startswith("UC"), c["id"]
 
 
@@ -136,6 +144,7 @@ def test_expectations_are_well_formed():
         (7, ["date"]),
         (27, ["budget"]),
         (32, ["date"]),
+        (39, ["location"]),  # round 2: "nearby" with no location; Saturday resolves
         (56, ["event_date"]),
         (57, ["event_date"]),
         (60, ["price_basis"]),
@@ -195,6 +204,10 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         (61, {"near_me": False}, "area"),
         (5, {"unclear": []}, "date"),
         (19, {"free": False, "price_max": 0}, "budget"),  # "under £0" isn't "free"
+        (14, {"vibe": None}, "vibe"),
+        (3, {"vibe": "Lively"}, "vibe"),
+        (4, {"who": "Friends"}, "who"),
+        (22, {"who": "Friends"}, "who"),  # no group in the phrase: none to invent
     ],
     ids=[
         "wrong weekday",
@@ -208,6 +221,10 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         "no location question",
         "vague date not flagged",
         "zero price, not free",
+        "vibe missed",
+        "wrong vibe",
+        "wrong who",
+        "invented who",
     ],
 )
 def test_a_wrong_reply_fails_that_field_in_both_scores(row, changes, field):
@@ -232,6 +249,34 @@ def test_another_spelling_of_the_same_area_scores_as_the_same():
 def test_also_accept_variants_count_for_model_only():
     results, _ = run([BY_ROW[60]], {"groq": [answer(60, unclear=[])], "cloudflare": []})
     assert all(results[0].model_only.values()) and all(results[0].end_to_end.values())
+
+
+def test_the_round_2_rows_score_vibe_and_who():
+    rows = {c["row"] for c in CASES if {"vibe", "who"} & set(c["scored"])}
+    assert rows == {3, 4, 12, 13, 14, 22, 50}
+
+
+def test_a_vibe_or_group_without_a_category_question_passes_but_asking_fails():
+    # "Something chilled tonight in Peckham": the model gives the vibe and doesn't ask.
+    results, _ = run([BY_ROW[3]], perfect([BY_ROW[3]]))
+    assert all(results[0].end_to_end.values()) and results[0].status == "ok"
+    # The model flags category as unclear as well: code still doesn't ask.
+    unclear = answer(3, unclear=["category"])
+    results, _ = run([BY_ROW[3]], {"groq": [unclear], "cloudflare": []})
+    assert results[0].end_to_end["category"] and results[0].missing == []
+    # No vibe and a category flag: it asks, and both category and vibe fail.
+    asks = answer(3, vibe=None, unclear=["category"])
+    results, _ = run([BY_ROW[3]], {"groq": [asks], "cloudflare": []})
+    (r,) = results
+    assert r.missing == ["category"]
+    assert not r.end_to_end["category"] and not r.end_to_end["vibe"]
+
+
+def test_no_vibe_is_also_right_where_the_doc_inferred_one():
+    for row in (12, 13):
+        results, _ = run([BY_ROW[row]], {"groq": [answer(row, vibe=None)], "cloudflare": []})
+        (r,) = results
+        assert all(r.model_only.values()) and r.end_to_end["vibe"], row
 
 
 def test_a_resting_case_is_a_provider_failure_left_out_of_both_accuracies():
@@ -423,7 +468,7 @@ def test_a_real_run_paces_groq_and_reports_tokens(monkeypatch, tmp_path):
     assert made == [{"groq": 7200}]
     summary = json.loads(out.read_text())["summary"]
     assert (summary["tokens"], summary["paced_wait_s"]) == ({}, 0.0)
-    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 2}
+    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 3}
 
 
 def test_supabase_config_needs_its_keys(monkeypatch, tmp_path):
@@ -472,7 +517,7 @@ def test_scores_go_to_langfuse_with_versions_and_failed_fields():
     e2e = bodies[("r68", "parse_end_to_end")]
     assert (e2e["value"], e2e["comment"]) == (0, "failed: date")
     assert e2e["traceId"] == results[1].trace_id
-    assert e2e["metadata"]["understand_prompt_version"] == 2
+    assert e2e["metadata"]["understand_prompt_version"] == 3
     assert e2e["metadata"]["llm_understand_version"] == 2
     assert bodies[("r64", "parse_model_only")]["value"] == 1
 

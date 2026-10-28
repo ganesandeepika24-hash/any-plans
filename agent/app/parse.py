@@ -71,10 +71,16 @@ class NoteOut(BaseModel):
     message: str
 
 
+class ChoiceGroupOut(BaseModel):
+    field: str | None  # category or vibe: what a tap fills; null for "Just surprise me"
+    choices: list[str]
+
+
 class QuestionOut(BaseModel):
     reason: str
     question: str
     choices: list[str]
+    groups: list[ChoiceGroupOut] = []  # the choices split by field, when they fill different ones
 
 
 class ParseResponse(BaseModel):
@@ -83,6 +89,8 @@ class ParseResponse(BaseModel):
     message: str | None = None
     query_id: UUID
     filters: dict[str, Any] | None = None  # search_items' jsonb argument
+    vibe: str | None = None  # beside the filters: search_items doesn't take them yet (0015)
+    who: str | None = None
     embedding_text: str | None = None
     notes: list[NoteOut] = []
     missing: list[str] = []  # set when status is needs_clarification
@@ -152,6 +160,9 @@ class Parser:
         notes = [NoteOut(**asdict(n)) for n in result.notes]
         filters = result.filters.to_json() if result.filters else None
         missing = list(result.missing)
+        understood = result.understood
+        vibe = understood.vibe if understood else None
+        who = understood.who if understood else None
         reason: Reason | None = None
         if result.status == "ai_resting":
             reason = "providers" if result.attempts else "unavailable"
@@ -161,11 +172,20 @@ class Parser:
             message=result.message,
             query_id=query_id,
             filters=filters,
+            vibe=vibe,
+            who=who,
             embedding_text=result.query_text,
             notes=notes,
             missing=missing,
             questions=[
-                QuestionOut(reason=q.reason, question=q.question, choices=list(q.choices))
+                QuestionOut(
+                    reason=q.reason,
+                    question=q.question,
+                    choices=list(q.choices),
+                    groups=[
+                        ChoiceGroupOut(field=g.field, choices=list(g.choices)) for g in q.groups
+                    ],
+                )
                 for q in result.questions
             ],
             trace_id=result.trace_id,
@@ -182,6 +202,8 @@ class Parser:
                 for a in result.attempts
             ],
             filters=stored_filters(result),
+            vibe=vibe,
+            who=who,
             embedding_text=result.query_text,
             notes=[n.model_dump() for n in notes],
             missing=missing,
@@ -241,13 +263,16 @@ class Parser:
         provider: str | None = None,
         attempts: list[dict[str, str]] | None = None,
         filters: dict[str, Any] | None = None,
+        vibe: str | None = None,
+        who: str | None = None,
         embedding_text: str | None = None,
         notes: list[dict[str, str]] | None = None,
         missing: list[str] | None = None,
         config_versions: dict[str, int],
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """A queries row (migration 002, plus missing from 013; columns proposed in 0013)."""
+        """A queries row (migration 002, plus missing from 013 and vibe and who from 015;
+        columns proposed in 0013)."""
         return {
             "id": str(query_id),
             "user_id": str(user_id),
@@ -258,6 +283,8 @@ class Parser:
             "provider": provider,
             "attempts": attempts or [],
             "filters": filters,
+            "vibe": vibe,
+            "who": who,
             "embedding_text": embedding_text,
             "notes": notes or [],
             "missing": missing or [],

@@ -13,7 +13,7 @@ The PRD measures parse accuracy (dates, area, budget, category) on an eval set, 
 | What counts as correct | The model's reply; the filters; **both, as two numbers** | Both | End to end says what users get. Model only separates model mistakes from resolver gaps, so stage 4 fixes the right thing. |
 | A doc expectation the resolver can't meet (months, unseeded areas, festival dates) | Drop the row; write what the resolver does; **keep the doc's expectation** | Keep | The eval should show the gap, not hide it. A test pins which rows a perfect model still fails. |
 | Clarify questions | Score separately; **score inside the field they belong to** | Inside | Asking for a date instead of guessing is the date field's answer. The chip wording isn't scored (owner's decision 6). |
-| Fields per row | All five everywhere; **the four PRD fields, plus radius only when stated** | Four plus radius | Owner's decision 6. Pin rows 23 and 24 score date and radius only (decision 7). |
+| Fields per row | All five everywhere; **the four PRD fields, plus radius only when stated** | Four plus radius | Owner's decision 6. Pin rows 23 and 24 score date and radius only (decision 7). Round 2 adds vibe and who on seven rows (0015). |
 | Config for a run | **Live (Supabase)**, or the migrations in the repo | Both, live by default | Live measures what users get. Repo tests a new prompt before it's applied (principle 8). |
 | Call cap | Per case; **per run, 80** | Per run | Owner's decision 8. A case starts only if both providers could still be tried within the cap. |
 | Where it runs | CI on every PR; **manual workflow** | Manual | A run spends real provider calls. PR and nightly runs are stage 3, with response caching (build plan). |
@@ -67,11 +67,11 @@ The PRD measures parse accuracy (dates, area, budget, category) on an eval set, 
 - `.github/workflows/evals.yml` runs it by hand with the repo secrets and uploads the results. Agent CI lints `evals/` and runs the scorer's tests.
 
 **Where the set departs from the seed doc** (rules made later win):
-- Rows 39 and 59: "Saturday" is the coming Saturday (31 Oct), by ambiguity rule 3, not the seed's 12 Dec and 19 Dec.
+- Rows 39 and 59: "Saturday" is the coming Saturday (31 Oct), by ambiguity rule 3, not the seed's 12 Dec and 19 Dec. The owner confirmed this reading on 28 Oct, when round 2's note on row 39 suggested otherwise.
 - Row 38 names no date, so it asks, by row 37's rule, instead of the seed's 12 Dec.
 - Row 51: Easter weekend follows 0012's long-weekend rule (Thu 25 Mar 17:00 to Tue 30 Mar 05:00), not the seed's Sat to Mon.
 - Rows 60 and 70: the date may be asked or left out. Row 60's doc lists only `price_basis`, but "Christmas market" with no date asks by row 37's rule.
-- Rows 4 and 13: the seed has no category, so none is expected, although the prompt reads "for kids" as Family.
+- Rows 4 and 13: Family is expected (round 2, 0015). It was none, from the seed's blank category.
 - The festival doc's suggested extra row ("Diwali on Sunday 8 November") isn't added. The set is the 73 rows the step asks for.
 
 ## Trade-offs
@@ -144,4 +144,26 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
   - fallbacks not counted
   - the limit at 8,000
   - 014 leaving v1 active (db test)
-- Paced rerun (`--config repo`, so `llm_understand` v2): pending.
+- **Baseline, the paced rerun** (28 Oct 2026, run 40612306072, `--config repo`: `llm_understand` v2, `understand_prompt` v2): **end to end 43.7% (31/71), model only 57.8% (41/71).**
+  - All 71 cases ran: no provider failures, no 429s and no fallbacks.
+  - It used 71 calls and 126,676 Groq tokens (about 1,800 a call, 63% of the daily limit), and waited 1,262 s for the pace.
+  - Per field, end to end: date 49/71, area 53/69, budget 68/69, category 52/69, radius 2/2.
+  - Per field, model only: date 55/71, area 66/69, budget 68/69, category 52/69, radius 2/2.
+  - Cloudflare was never called, so v2's 2,048 tokens are untested live.
+  - Model errors not covered by round 2's rules, for the later prompt work:
+    - It asks a category for "Things to do in Soho" (r64), "Just surprise me" (r73) and a pin search (r23). The prompt says not to.
+    - It asks a date for Boxing Day (r41), New Year's Eve (r43) and "Friday 6 November" (r67).
+
+## Round 2: vibe and who in the set (28 Oct 2026, decision 0015)
+
+- **New scored fields.** `vibe` and `who` are scored on rows 3, 4, 12, 13, 14, 22 and 50.
+  - `expected.vibe` and `expected.who` list the acceptable values.
+  - Rows 12 and 13 also accept no vibe: the doc inferred "cultural" and "outdoors" from the activity.
+  - Row 22 expects none, so a model that invents a group fails.
+  - End to end compares the vibe and who that `/parse` returns. Model only compares the model's own reply.
+- **Category.** Rows 4 and 13 expect Family, matching rows 31 and 48.
+- **Row 39** ("Christmas markets + drinks nearby, Saturday") changes to `needs_clarification` with `missing: ["location"]`.
+  - Round 2 asked for `["location", "date"]`, taking a bare "Saturday" to ask.
+  - On 28 Oct the owner kept rule 3's reading instead (a bare weekday is the coming one), so the date resolves to 31 Oct. Rows 4, 6, 12, 13, 14, 27, 31 and 59 depend on the same reading.
+- **Ceiling with a perfect model:** unchanged at 47/71 end to end. Row 39 passes with a perfect model, as before.
+- **Eval with prompt v3:** pending. It runs on the PR's branch with `--config repo`.

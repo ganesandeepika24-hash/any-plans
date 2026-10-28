@@ -36,6 +36,10 @@ WhenKind = Literal[
     "holiday",
 ]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+# The PRD's vibe and who chips (round 2, decision 0015). They describe the outing, not
+# the kind of event, so a search with one of them needs no category question.
+Vibe = Literal["Chilled", "Lively", "Cultural", "Foodie", "Outdoors"]
+Who = Literal["Solo", "Date", "Friends", "Family with kids"]
 # What the model may say was too vague to search on. Code adds the other clarify
 # reasons (location, price_basis, event_date) from the fields below.
 Unclear = Literal["date", "budget", "category"]
@@ -89,6 +93,8 @@ class UnderstoodQuery(_Strict):
     free: bool
     near_me: bool  # "near me", "around here": needs the user's location
     event: str | None = Field(max_length=100)  # a named event whose date the user didn't give
+    vibe: Vibe | None  # "chilled", "lively"
+    who: Who | None  # "with the kids", "hen do"
     unclear: list[Unclear]
 
     @field_validator("keywords", "place", "event")

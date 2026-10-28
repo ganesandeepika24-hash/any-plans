@@ -1,34 +1,45 @@
-"""The question for each clarify reason (decisions 0012 and 0013).
+"""The question for each clarify reason (decisions 0012, 0013 and 0015).
 
 One question per missing reason, in the order resolve() lists them, each naming what the
 person asked for. Choices are what the app offers as taps; an empty list means a typed
-answer. The app shows them instead of running a search.
+answer. Groups split the choices by the field a tap fills (the category question offers
+categories and vibes); a group with no field holds the choices that fill none. The app
+shows them instead of running a search.
 """
 
 from dataclasses import dataclass
+from typing import Literal, get_args
 
 from app.understand.resolve import Missing
-from app.understand.schema import UnderstoodQuery
+from app.understand.schema import UnderstoodQuery, Vibe
 
 LOCATION_CHOICES = ("Use my location", "Pick an area", "Drop a pin on the map")
-CATEGORY_CHOICES = (
-    "Music",
-    "Comedy",
-    "Food & Drink",
-    "Arts",
-    "Nightlife",
-    "Family",
-    "Sport",
-    "Just surprise me",
-)
+CATEGORY_GROUP = ("Music", "Comedy", "Food & Drink", "Arts", "Nightlife", "Family", "Sport")
+VIBE_GROUP = get_args(Vibe)
+SURPRISE_ME = ("Just surprise me",)
 PRICE_BASIS_CHOICES = ("Per person", "In total")
+
+
+@dataclass(frozen=True)
+class ChoiceGroup:
+    field: Literal["category", "vibe"] | None  # what a tap fills; None for "surprise me"
+    choices: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class Question:
     reason: Missing
     question: str
-    choices: tuple[str, ...] = ()
+    choices: tuple[str, ...] = ()  # every choice, in the groups' order
+    groups: tuple[ChoiceGroup, ...] = ()
+
+
+CATEGORY_GROUPS = (
+    ChoiceGroup("category", CATEGORY_GROUP),
+    ChoiceGroup("vibe", VIBE_GROUP),
+    ChoiceGroup(None, SURPRISE_ME),
+)
+CATEGORY_CHOICES = tuple(c for g in CATEGORY_GROUPS for c in g.choices)
 
 
 def questions(
@@ -68,7 +79,12 @@ def questions(
                 )
             case "category":
                 out.append(
-                    Question(reason, f"{subject}: what are you in the mood for?", CATEGORY_CHOICES)
+                    Question(
+                        reason,
+                        f"{subject}: what are you in the mood for?",
+                        CATEGORY_CHOICES,
+                        CATEGORY_GROUPS,
+                    )
                 )
     return tuple(out)
 

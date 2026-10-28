@@ -225,14 +225,17 @@ def _queries_columns() -> set[str]:
     """queries' columns: 002's create table plus the columns later migrations add."""
     sql = (REPO / "db" / "migrations" / "002_logging.sql").read_text()
     body = re.search(r"create table public\.queries \((.*?)\n\);", sql, re.S).group(1)
-    added = re.findall(
-        r"add column (\w+)", (REPO / "db" / "migrations" / "013_parse_clarify.sql").read_text()
-    )
+    added = {
+        column
+        for path in sorted((REPO / "db" / "migrations").glob("*.sql"))
+        for statement in re.findall(r"alter table public\.queries\b(.*?);", path.read_text(), re.S)
+        for column in re.findall(r"add column (\w+)", statement)
+    }
     return {
         line.split()[0]
         for line in body.splitlines()
         if line.strip() and not line.strip().startswith(("constraint", "--"))
-    } | set(added)
+    } | added
 
 
 def test_the_row_matches_the_queries_columns(harness, token):
@@ -405,6 +408,7 @@ def test_needs_clarification_answers_with_questions_and_the_filters_that_resolve
         "reason": "location",
         "question": "Something: which part of London, or should I use your location?",
         "choices": ["Use my location", "Pick an area", "Drop a pin on the map"],
+        "groups": [],
     }
     (row,) = h.log.rows
     assert (row["status"], row["missing"], row["provider"]) == (
@@ -413,6 +417,42 @@ def test_needs_clarification_answers_with_questions_and_the_filters_that_resolve
         "groq",
     )
     assert row["filters"] == body["filters"]
+
+
+def test_the_category_question_offers_categories_and_vibes_in_groups(signing_key, token):
+    fun = reply(keywords="something fun", unclear=["category"])
+    h = Harness(signing_key, llm=FakeLLM(groq=[fun], cloudflare=[]))
+    body = h.post({"query": "something fun"}, token).json()
+    (q,) = body["questions"]
+    assert q["reason"] == "category"
+    assert q["groups"] == [
+        {
+            "field": "category",
+            "choices": ["Music", "Comedy", "Food & Drink", "Arts", "Nightlife", "Family", "Sport"],
+        },
+        {"field": "vibe", "choices": ["Chilled", "Lively", "Cultural", "Foodie", "Outdoors"]},
+        {"field": None, "choices": ["Just surprise me"]},
+    ]
+    assert q["choices"] == [c for g in q["groups"] for c in g["choices"]]
+    assert (body["vibe"], body["who"]) == (None, None)
+
+
+def test_vibe_and_who_come_back_beside_the_filters_and_are_logged(signing_key, token):
+    hen = reply(keywords="hen do", place="Shoreditch", vibe="Lively", who="Friends")
+    h = Harness(signing_key, llm=FakeLLM(groq=[hen], cloudflare=[]))
+    body = h.post({"query": "hen do in Shoreditch, lively"}, token).json()
+    assert (body["status"], body["vibe"], body["who"]) == ("ok", "Lively", "Friends")
+    assert "vibe" not in body["filters"] and "who" not in body["filters"]
+    (row,) = h.log.rows
+    assert (row["vibe"], row["who"]) == ("Lively", "Friends")
+
+
+def test_a_resting_reply_logs_no_vibe_or_who(signing_key, token):
+    slow = LLMError("timeout", "slow")
+    h = Harness(signing_key, llm=FakeLLM(groq=[slow], cloudflare=[slow]))
+    body = h.post({"query": "something chilled"}, token).json()
+    assert (body["status"], body["vibe"], body["who"]) == ("ai_resting", None, None)
+    assert (h.log.rows[0]["vibe"], h.log.rows[0]["who"]) == (None, None)
 
 
 def test_an_ok_reply_has_no_missing_or_questions(harness, token):

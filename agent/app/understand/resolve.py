@@ -129,7 +129,8 @@ def resolve(
 
     if understood.categories:
         fields["categories"] = understood.categories
-    elif "category" in understood.unclear:
+    elif "category" in understood.unclear and understood.vibe is None and understood.who is None:
+        # A vibe or a group is enough to search on: "something chilled" asks nothing.
         missing.add("category")
 
     used_location = _resolve_place(understood, city, location, fields, notes, missing)

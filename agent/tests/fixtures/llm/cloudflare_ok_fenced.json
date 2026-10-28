@@ -9,7 +9,7 @@
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "```json\n{\n  \"keywords\": \"jazz\",\n  \"categories\": [\n    \"Music\"\n  ],\n  \"when\": {\n    \"kind\": \"tonight\",\n    \"weekday\": null,\n    \"qualifier\": null,\n    \"month\": null,\n    \"day\": null,\n    \"holiday\": null\n  },\n  \"place\": \"Soho\",\n  \"distance\": null,\n  \"price_min\": null,\n  \"price_max\": 20,\n  \"price_scope\": null,\n  \"free\": false,\n  \"near_me\": false,\n  \"event\": null,\n  \"unclear\": []\n}\n```"
+        "content": "```json\n{\n  \"keywords\": \"jazz\",\n  \"categories\": [\n    \"Music\"\n  ],\n  \"when\": {\n    \"kind\": \"tonight\",\n    \"weekday\": null,\n    \"qualifier\": null,\n    \"month\": null,\n    \"day\": null,\n    \"holiday\": null\n  },\n  \"place\": \"Soho\",\n  \"distance\": null,\n  \"price_min\": null,\n  \"price_max\": 20,\n  \"price_scope\": null,\n  \"free\": false,\n  \"near_me\": false,\n  \"event\": null,\n  \"vibe\": null,\n  \"who\": null,\n  \"unclear\": []\n}\n```"
       },
       "finish_reason": "stop"
     }
