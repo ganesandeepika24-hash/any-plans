@@ -1,11 +1,19 @@
 """Code, not the model, turns intent into filters: dates, places, prices (principle 5)."""
 
+from dataclasses import replace
 from datetime import datetime
 from itertools import pairwise
 
 import pytest
 
-from app.understand.resolve import NO_RANGES, DateRanges, date_window, normalise, resolve
+from app.understand.resolve import (
+    NO_RANGES,
+    DateRanges,
+    Point,
+    date_window,
+    normalise,
+    resolve,
+)
 from app.understand.schema import SearchFilters, UnderstoodQuery, When
 from tests.understand_support import london, migration_config, reply, when
 
@@ -573,8 +581,9 @@ def test_places_match_names_and_aliases(place, area_id):
 
 
 def test_seed_parsing_matches_the_database_shape():
-    assert len(CITY.areas) == 53  # understand_context returns 53 in CI's db
+    assert len(CITY.areas) == 1239  # understand_context returns 1,239 in CI's db (0021)
     assert all(alias for a in CITY.areas for alias in a.aliases)
+    assert (CITY.centre.lat, CITY.centre.lon, CITY.default_radius_km) == (51.507333, -0.127654, 10)
 
 
 @pytest.mark.parametrize("place", ["!!!", "the", "  "])
@@ -604,24 +613,40 @@ def test_a_huge_distance_is_capped_with_a_note():
     assert [n.code for n in r.notes] == ["radius_capped"]
 
 
-def test_an_unknown_place_drops_location_and_says_so():
+def central(f) -> bool:
+    """The default area: the city's centre and default radius (PRD F-04, decision 0021)."""
+    return (f.lat, f.lon, f.radius_km) == (CITY.centre.lat, CITY.centre.lon, 10)
+
+
+def test_an_unknown_place_falls_back_to_central_london_and_says_so():
     r = resolve(understood(place="Narnia", categories=["Arts"]), WED_EVENING, CITY)
-    assert r.filters.lat is None and r.filters.categories == ["Arts"]
+    assert central(r.filters) and r.filters.categories == ["Arts"]
     assert [n.code for n in r.notes] == ["unknown_place"]
-    assert "Narnia" in r.notes[0].message
+    assert r.notes[0].message == "Couldn't find 'Narnia', so showing central London."
+    assert not r.used_location
 
 
 @pytest.mark.parametrize("place", ["Green", "King", "Soh", "Camden Tow", "Cross"])
 def test_part_of_a_name_is_not_a_match(place):
     # No guessing: "Green" isn't Greenwich.
     r = resolve(understood(place=place), WED_EVENING, CITY)
-    assert r.filters.lat is None
+    assert central(r.filters)
     assert [n.code for n in r.notes] == ["unknown_place"]
 
 
-def test_an_unknown_place_with_a_distance_gets_one_note():
+def test_an_unknown_place_with_a_distance_gets_one_note_and_the_default_radius():
+    # The distance was from the place we couldn't find, so it doesn't apply to the centre.
     r = resolve(understood(place="Narnia", distance={"value": 1, "unit": "km"}), WED_EVENING, CITY)
-    assert [n.code for n in r.notes] == ["unknown_place"]
+    assert [n.code for n in r.notes] == ["unknown_place"] and central(r.filters)
+
+
+def test_an_unknown_place_with_a_pin_searches_around_the_pin():
+    pin = Point(51.5255, -0.0877, "pin")
+    r = resolve(
+        understood(place="Old Street", distance={"value": 1, "unit": "mi"}), WED_EVENING, CITY, pin
+    )
+    assert (r.filters.lat, r.filters.lon) == (pin.lat, pin.lon) and r.used_location
+    assert r.notes[0].message == "Couldn't find 'Old Street', so searching around your point."
 
 
 def test_a_distance_without_a_place_asks_for_a_location():
@@ -630,9 +655,78 @@ def test_a_distance_without_a_place_asks_for_a_location():
     assert r.missing == ("location",)
 
 
-def test_london_itself_means_no_location_filter():
-    r = resolve(understood(place="London"), WED_EVENING, CITY)
+@pytest.mark.parametrize("place", ["London", "london", "the London"])
+def test_london_itself_is_central_london_with_a_note(place):
+    # They may have meant the whole city, so the note lets them refine.
+    r = resolve(understood(place=place), WED_EVENING, CITY)
+    assert central(r.filters) and not r.used_location
+    assert [(n.code, n.message) for n in r.notes] == [("default_area", "Showing central London.")]
+
+
+@pytest.mark.parametrize("place", ["central London", "Central london", "central  London"])
+def test_central_london_typed_is_the_citys_centre_with_no_note(place):
+    r = resolve(understood(place=place), WED_EVENING, CITY)
+    assert central(r.filters) and r.notes == ()
+
+
+def test_what_wins_a_place_then_the_events_area_then_the_users_point_then_the_default():
+    home = Point(51.5031, -0.1132, "device")
+    show = understood(event="Chelsea Flower Show")
+    kc = CITY.area("london-kensington-and-chelsea")
+    # The event's venue area beats the user's point and the default.
+    f = resolve(show, WED_EVENING, CITY, home).filters
+    assert (f.lat, f.lon, f.radius_km) == (kc.lat, kc.lon, 6)
+    # A named place beats the event's area.
+    f = resolve(understood(event="Chelsea Flower Show", place="Soho"), WED_EVENING, CITY).filters
+    assert (f.lat, f.lon) == (CITY.area("london-soho").lat, CITY.area("london-soho").lon)
+    # With no place and no event area, the user's point beats the default.
+    r = resolve(understood(keywords="jazz"), WED_EVENING, CITY, home)
+    assert (r.filters.lat, r.filters.lon) == (home.lat, home.lon) and r.used_location
+    # And with nothing, the default.
+    assert central(resolve(understood(keywords="jazz"), WED_EVENING, CITY).filters)
+
+
+def test_an_event_with_no_area_uses_the_default():
+    assert central(resolve(understood(event="Hanukkah"), WED_EVENING, CITY).filters)
+
+
+def test_near_me_without_a_point_still_asks_rather_than_using_the_default():
+    r = resolve(understood(near_me=True), WED_EVENING, CITY)
+    assert r.filters.lat is None and r.missing == ("location",)
+
+
+def test_a_context_from_before_021_has_no_default():
+    old = replace(CITY, centre=None, default_radius_km=None)
+    r = resolve(understood(keywords="jazz"), WED_EVENING, old)
     assert r.filters.lat is None and r.notes == ()
+    r = resolve(understood(place="Narnia"), WED_EVENING, old)
+    assert r.filters.lat is None
+    assert r.notes[0].message == "Couldn't find 'Narnia', so showing all of London."
+
+
+@pytest.mark.parametrize(
+    ("place", "area_id"),
+    [
+        ("Bloomsbury", "london-bloomsbury"),  # OSM suburb
+        ("Southall", "london-southall"),  # OSM town
+        ("Chinatown", "london-soho"),  # a landmark alias beats OSM's own Chinatown
+        ("Richmond Park", "london-richmond-upon-thames"),
+        ("Somerset House", "london-strand"),
+        ("the Strand", "london-strand"),
+        ("Regent Street", "london-regent-street"),
+        ("Liverpool Street station", "london-liverpool-street"),
+        ("Chelsea", "london-kensington-and-chelsea"),  # a borough alias beats OSM's Chelsea
+        ("Greenwich", "london-greenwich"),  # the borough beats OSM's town
+    ],
+)
+def test_osm_places_landmarks_and_the_clash_order(place, area_id):
+    assert CITY.find_area(place).id == area_id
+
+
+@pytest.mark.parametrize("place", ["Hayes", "Plaistow"])
+def test_a_name_two_osm_places_share_is_left_out(place):
+    # Hayes is in Hillingdon and in Bromley, Plaistow in Newham and in Bromley.
+    assert CITY.find_area(place) is None
 
 
 # Prices, categories, keywords -------------------------------------------------------
@@ -654,10 +748,11 @@ def test_an_inverted_price_range_is_dropped_with_a_note():
     assert [n.code for n in r.notes] == ["price_range_inverted"]
 
 
-def test_keywords_become_the_query_text_and_nothing_said_means_no_filters():
+def test_keywords_become_the_query_text_and_nothing_said_means_central_london():
     r = resolve(understood(keywords="drag brunch"), WED_EVENING, CITY)
     assert r.query_text == "drag brunch"
-    assert r.filters.to_json() == {}
+    assert r.filters.to_json() == {"lat": 51.507333, "lon": -0.127654, "radius_km": 10.0}
+    assert r.notes == ()
 
 
 def test_a_full_query():

@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.understand.resolve import Area, CalendarDate, City
+from app.understand.resolve import Area, CalendarDate, City, Point
 
 CONFIG_TTL_S = 60.0
 CONTEXT_TTL_S = 3600.0
@@ -114,7 +114,9 @@ class SupabaseStore:
 
 
 def city_from_context(context: dict[str, Any]) -> City:
-    """Build a City from understand_context's jsonb (migrations 011 and 019)."""
+    """Build a City from understand_context's jsonb (migrations 011, 019 and 021). A
+    context from before 021 has no centre, area_id or default radius: the City then has
+    no default area, as before."""
     areas = tuple(
         Area(
             id=a["id"],
@@ -134,14 +136,18 @@ def city_from_context(context: dict[str, Any]) -> City:
             first=date.fromisoformat(d["starts_on"]),
             last=date.fromisoformat(d["ends_on"]),
             estimate=bool(d["estimate"]),
+            area_id=d.get("area_id"),
         )
         for d in context.get("calendar") or ()
     )
     city = context["city"]
+    has_centre = city.get("lat") is not None and city.get("lon") is not None
     return City(
         id=city["id"],
         name=city["name"],
         tz=ZoneInfo(city["timezone"]),
         areas=areas,
         calendar=calendar,
+        centre=Point(float(city["lat"]), float(city["lon"])) if has_centre else None,
+        default_radius_km=float(city["default_radius_km"]) if has_centre else None,
     )

@@ -2,6 +2,15 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: stage 1 step 5, London areas (decision 0021)
+
+- **I asked about choices the owner's decisions covered.** The first plan asked about landmarks and venue areas and deferred the F-04 default. All three were in `claude/step-5-areas-decisions.md`, which I couldn't see until it was pasted. The plan was redone from it.
+- **A path that looked doubled.** The owner read `jobs/jobs/build_area_seed.py` as a doubled folder. It's the path every job uses (the `jobs` package inside the `jobs/` project, run as `python -m jobs.<name>`). Explained rather than moved.
+- **The "user's point" flag would have lied.** `_resolve_place` returned `area is None` to mean "the user's point was used". With a default centre that's no longer true. The default would have been treated as the user's location and left out of stored filters. Caught by reading the function end to end before running tests. It now returns whether the point used is the user's.
+- **Two test expectations were mine, not the code's.** I typed the station's coordinates wrong, and picked a name that normalises to the landmark's own name for an id-clash test. Both fixed in the tests.
+- **One db check depended on order.** 019's block empties `calendar_dates` inside the shared transaction, so 021's calendar check had to run before it.
+- **The scorer's new area form had no wrong-reply test.** A break that accepted any area passed. Row 40 with "Soho" now fails it.
+
 ## 2026-10-28: stage 1 step 4, date ranges (decision 0020)
 
 - **I asked questions the decisions already answered.** Rows 17, 21 and 36 were settled by the PRD and the parser decisions, and the owner had to point back to them. The rule now: check the PRD and `docs/decisions/` first, and ask only about product choices they don't cover, once each.

@@ -203,9 +203,10 @@ begin
   end if;
 
   if (select count(*) from public.areas where kind = 'borough') <> 33
-     or (select count(*) from public.areas where kind = 'neighbourhood') <> 20
+     or (select count(*) from public.areas where kind = 'neighbourhood') <> 1203
+     or (select count(*) from public.areas where kind = 'landmark') <> 3
      or exists (select 1 from public.areas where city_id <> 'london' or centre_geom is null) then
-    raise exception 'areas seed is wrong: expected 33 boroughs and 20 neighbourhoods in London, all with centres';
+    raise exception 'areas seed is wrong: expected 33 boroughs, 1,203 neighbourhoods and 3 landmarks in London (0021), all with centres';
   end if;
 
   if not exists (select 1 from public.schema_migrations where version = '001' and checksum ~ '^[0-9a-f]{64}$') then
@@ -729,6 +730,82 @@ begin
   end if;
 end $$;
 
+-- Migration 021 and the seeds (before 019's block, which empties calendar_dates): landmarks, ONS codes, calendar venue areas, the city centre.
+do $$
+declare
+  ctx jsonb;
+begin
+  if (select count(*) from public.areas where kind = 'borough' and gss_code ~ '^E09[0-9]{6}$') <> 33
+     or (select count(distinct gss_code) from public.areas) <> 33
+     or exists (select 1 from public.areas where kind <> 'borough' and gss_code is not null) then
+    raise exception 'expected 33 boroughs, each with its own ONS code, and no code elsewhere';
+  end if;
+  if (select count(*) from public.areas where kind = 'landmark') <> 3
+     or (select count(*) from public.areas) <> 1239 then
+    raise exception 'the areas seed should load 1,239 areas, 3 of them landmarks';
+  end if;
+  if (select gss_code from public.areas where id = 'london-westminster') <> 'E09000033' then
+    raise exception 'Westminster should be E09000033';
+  end if;
+
+  begin
+    insert into public.areas (id, city_id, name, kind) values ('test-kind', 'london', 'X', 'street');
+    raise exception 'areas accepted an unknown kind';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into public.areas (id, city_id, name, kind, gss_code)
+      values ('test-gss', 'london', 'X', 'neighbourhood', 'E09000099');
+    raise exception 'a neighbourhood accepted an ONS code';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into public.areas (id, city_id, name, kind, gss_code)
+      values ('test-gss', 'london', 'X', 'borough', 'E06000001');
+    raise exception 'a borough accepted a code that isn''t London''s';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into public.areas (id, city_id, name, kind, gss_code)
+      values ('test-gss', 'london', 'X', 'borough', 'E09000001');
+    raise exception 'two areas shared an ONS code';
+  exception when unique_violation then null;
+  end;
+
+  if (select area_id from public.calendar_dates where id = 'london-2027-chelsea-flower-show')
+     is distinct from 'london-kensington-and-chelsea'
+     or (select count(*) from public.calendar_dates where area_id is not null) <> 1 then
+    raise exception 'only the Chelsea Flower Show should have a venue area in the seed';
+  end if;
+
+  ctx := public.understand_context('london');
+  if (ctx->'city'->>'default_radius_km')::numeric <> 10
+     or round((ctx->'city'->>'lat')::numeric, 6) <> 51.507333
+     or round((ctx->'city'->>'lon')::numeric, 6) <> -0.127654 then
+    raise exception 'understand_context should return the city centre and radius, got %', ctx->'city';
+  end if;
+  if jsonb_array_length(ctx->'areas') <> 1239 then
+    raise exception 'understand_context returned % areas', jsonb_array_length(ctx->'areas');
+  end if;
+
+  -- An area deleted from under a calendar entry leaves the entry without one.
+  insert into public.areas (id, city_id, name, kind) values ('test-venue', 'london', 'Venue', 'landmark');
+  update public.calendar_dates set area_id = 'test-venue' where id = 'london-2026-hanukkah';
+  delete from public.areas where id = 'test-venue';
+  if (select area_id from public.calendar_dates where id = 'london-2026-hanukkah') is not null then
+    raise exception 'deleting an area didn''t clear calendar_dates.area_id';
+  end if;
+
+  if not has_table_privilege('anon', 'public.areas', 'select')
+     or has_table_privilege('anon', 'public.areas', 'insert')
+     or has_table_privilege('authenticated', 'public.areas', 'update')
+     or not has_table_privilege('service_role', 'public.areas', 'insert')
+     or has_table_privilege('anon', 'public.calendar_dates', 'select')
+     or has_table_privilege('service_role', 'public.calendar_dates', 'insert') then
+    raise exception 'areas should be readable by all and writable by service_role only; calendar_dates unchanged';
+  end if;
+end $$;
+
 -- Migration 019 and the calendar seed: calendar_dates, and understand_context's calendar.
 do $$
 declare
@@ -779,7 +856,8 @@ begin
   end if;
   if (select e from jsonb_array_elements(ctx->'calendar') e where e->>'id' = 'test-coming')
      is distinct from jsonb_build_object('id', 'test-coming', 'name', 'Coming', 'aliases', '["Soon"]'::jsonb,
-                                         'starts_on', current_date + 3, 'ends_on', current_date + 4, 'estimate', true) then
+                                         'starts_on', current_date + 3, 'ends_on', current_date + 4, 'estimate', true,
+                                         'area_id', null) then
     raise exception 'understand_context calendar entry has the wrong shape';
   end if;
   if jsonb_array_length(ctx->'areas') = 0 then

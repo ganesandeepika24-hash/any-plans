@@ -1,7 +1,7 @@
 """Shared test helpers for the Understand node. No network: everything here is local.
 
-The city comes from db/seed/areas.sql and db/seed/calendar.sql and the config from the
-migrations, so tests run against what ships, not a hand-made copy.
+The city comes from db/seed/cities.sql, areas.sql and calendar.sql and the config from
+the migrations, so tests run against what ships, not a hand-made copy.
 """
 
 import json
@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.understand.llm import Completion, LLMError, ProviderConfig, Usage
-from app.understand.resolve import Area, CalendarDate, City
+from app.understand.resolve import Area, CalendarDate, City, Point
 from app.understand.store import ConfigEntry
 from app.understand.tracing import NullTracer, Trace
 
@@ -25,13 +25,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 _QUOTED = r"'((?:[^']|'')*)'"
 _AREA_ROW = re.compile(
-    rf"^\s*\({_QUOTED}, {_QUOTED}, '(borough|neighbourhood)', "
+    rf"^\s*\({_QUOTED}, {_QUOTED}, '(borough|neighbourhood|landmark)', "
     r"(array\[.*?\]::text\[\]|'\{\}'::text\[\]), "
-    r"'SRID=4326;POINT\(([-\d.]+) ([-\d.]+)\)', ([\d.]+)\)"
+    r"'SRID=4326;POINT\(([-\d.]+) ([-\d.]+)\)', ([\d.]+), (?:'E09\d{6}'|null)\)"
 )
+_CITY_ROW = re.compile(r"'SRID=4326;POINT\(([-\d.]+) ([-\d.]+)\)', ([\d.]+),")
 _CALENDAR_ROW = re.compile(
     rf"^\s*\({_QUOTED}, {_QUOTED}, (array\[.*?\]::text\[\]|'\{{\}}'::text\[\]), {_QUOTED}, "
-    rf"'([\d-]+)', '([\d-]+)', (true|false), "
+    rf"'([\d-]+)', '([\d-]+)', (true|false), {_QUOTED}, '[\d-]+', ({_QUOTED}|null)\)"
 )
 
 
@@ -67,7 +68,7 @@ def seed_calendar() -> tuple[CalendarDate, ...]:
         m = _CALENDAR_ROW.match(line)
         if not m:
             continue
-        date_id, name, aliases, _kind, first, last, estimate = m.groups()
+        date_id, name, aliases, _kind, first, last, estimate, _source, area, area_id = m.groups()
         dates.append(
             CalendarDate(
                 id=_unquote(date_id),
@@ -78,18 +79,22 @@ def seed_calendar() -> tuple[CalendarDate, ...]:
                 first=date.fromisoformat(first),
                 last=date.fromisoformat(last),
                 estimate=estimate == "true",
+                area_id=None if area == "null" else _unquote(area_id),
             )
         )
     return tuple(dates)
 
 
 def london() -> City:
+    lon, lat, radius = _CITY_ROW.search((REPO / "db" / "seed" / "cities.sql").read_text()).groups()
     return City(
         id="london",
         name="London",
         tz=ZoneInfo("Europe/London"),
         areas=seed_areas(),
         calendar=seed_calendar(),
+        centre=Point(float(lat), float(lon)),
+        default_radius_km=float(radius),
     )
 
 

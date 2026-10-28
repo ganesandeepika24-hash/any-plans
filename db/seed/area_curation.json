@@ -1,0 +1,321 @@
+{
+ "_about": "Hand-picked parts of db/seed/areas.sql (decision 0021). jobs.build_area_seed reads this file, ONS's boroughs and the Geofabrik extract, and writes the seed. Edit here, then rerun the script.",
+ "boroughs": {
+  "london-barking-and-dagenham": {
+   "aliases": [
+    "Barking",
+    "Dagenham"
+   ]
+  },
+  "london-barnet": {
+   "aliases": []
+  },
+  "london-bexley": {
+   "aliases": []
+  },
+  "london-brent": {
+   "aliases": []
+  },
+  "london-bromley": {
+   "aliases": []
+  },
+  "london-camden": {
+   "aliases": []
+  },
+  "london-city-of-london": {
+   "aliases": [
+    "The City",
+    "Square Mile"
+   ]
+  },
+  "london-croydon": {
+   "aliases": []
+  },
+  "london-ealing": {
+   "aliases": []
+  },
+  "london-enfield": {
+   "aliases": []
+  },
+  "london-greenwich": {
+   "aliases": []
+  },
+  "london-hackney": {
+   "aliases": []
+  },
+  "london-hammersmith-and-fulham": {
+   "aliases": [
+    "Hammersmith",
+    "Fulham"
+   ]
+  },
+  "london-haringey": {
+   "aliases": []
+  },
+  "london-harrow": {
+   "aliases": []
+  },
+  "london-havering": {
+   "aliases": []
+  },
+  "london-hillingdon": {
+   "aliases": []
+  },
+  "london-hounslow": {
+   "aliases": []
+  },
+  "london-islington": {
+   "aliases": []
+  },
+  "london-kensington-and-chelsea": {
+   "aliases": [
+    "Kensington",
+    "Chelsea",
+    "RBKC"
+   ]
+  },
+  "london-kingston-upon-thames": {
+   "aliases": [
+    "Kingston"
+   ]
+  },
+  "london-lambeth": {
+   "aliases": []
+  },
+  "london-lewisham": {
+   "aliases": []
+  },
+  "london-merton": {
+   "aliases": []
+  },
+  "london-newham": {
+   "aliases": []
+  },
+  "london-redbridge": {
+   "aliases": []
+  },
+  "london-richmond-upon-thames": {
+   "aliases": [
+    "Richmond",
+    "Richmond Park"
+   ]
+  },
+  "london-southwark": {
+   "aliases": []
+  },
+  "london-sutton": {
+   "aliases": []
+  },
+  "london-tower-hamlets": {
+   "aliases": []
+  },
+  "london-waltham-forest": {
+   "aliases": []
+  },
+  "london-wandsworth": {
+   "aliases": []
+  },
+  "london-westminster": {
+   "aliases": [
+    "City of Westminster"
+   ]
+  }
+ },
+ "neighbourhoods": [
+  {
+   "id": "london-soho",
+   "name": "Soho",
+   "aliases": [
+    "Chinatown"
+   ],
+   "lat": 51.514065,
+   "lon": -0.135049,
+   "osm": "relation/17710512"
+  },
+  {
+   "id": "london-shoreditch",
+   "name": "Shoreditch",
+   "aliases": [],
+   "lat": 51.526669,
+   "lon": -0.079893,
+   "osm": "node/27365029"
+  },
+  {
+   "id": "london-camden-town",
+   "name": "Camden Town",
+   "aliases": [],
+   "lat": 51.539253,
+   "lon": -0.142757,
+   "osm": "node/399607277"
+  },
+  {
+   "id": "london-south-bank",
+   "name": "South Bank",
+   "aliases": [
+    "Southbank"
+   ],
+   "lat": 51.506532,
+   "lon": -0.11342,
+   "osm": "node/450524790"
+  },
+  {
+   "id": "london-covent-garden",
+   "name": "Covent Garden",
+   "aliases": [],
+   "lat": 51.511736,
+   "lon": -0.122677,
+   "osm": "node/2290086954"
+  },
+  {
+   "id": "london-kings-cross",
+   "name": "King's Cross",
+   "aliases": [
+    "Kings Cross"
+   ],
+   "lat": 51.529108,
+   "lon": -0.122413,
+   "osm": "node/3936965089"
+  },
+  {
+   "id": "london-brixton",
+   "name": "Brixton",
+   "aliases": [],
+   "lat": 51.463391,
+   "lon": -0.114802,
+   "osm": "node/21521237"
+  },
+  {
+   "id": "london-peckham",
+   "name": "Peckham",
+   "aliases": [],
+   "lat": 51.473412,
+   "lon": -0.069932,
+   "osm": "node/207141595"
+  },
+  {
+   "id": "london-dalston",
+   "name": "Dalston",
+   "aliases": [],
+   "lat": 51.543212,
+   "lon": -0.076013,
+   "osm": "node/27365025"
+  },
+  {
+   "id": "london-hackney-wick",
+   "name": "Hackney Wick",
+   "aliases": [],
+   "lat": 51.544354,
+   "lon": -0.025467,
+   "osm": "node/3939373094"
+  },
+  {
+   "id": "london-notting-hill",
+   "name": "Notting Hill",
+   "aliases": [],
+   "lat": 51.510999,
+   "lon": -0.205527,
+   "osm": "node/2268352172"
+  },
+  {
+   "id": "london-clapham",
+   "name": "Clapham",
+   "aliases": [],
+   "lat": 51.461447,
+   "lon": -0.138627,
+   "osm": "node/27554267"
+  },
+  {
+   "id": "london-mayfair",
+   "name": "Mayfair",
+   "aliases": [],
+   "lat": 51.511087,
+   "lon": -0.147058,
+   "osm": "node/26745366"
+  },
+  {
+   "id": "london-marylebone",
+   "name": "Marylebone",
+   "aliases": [],
+   "lat": 51.519637,
+   "lon": -0.151963,
+   "osm": "node/27467066"
+  },
+  {
+   "id": "london-fitzrovia",
+   "name": "Fitzrovia",
+   "aliases": [],
+   "lat": 51.522943,
+   "lon": -0.138355,
+   "osm": "node/27467065"
+  },
+  {
+   "id": "london-bermondsey",
+   "name": "Bermondsey",
+   "aliases": [],
+   "lat": 51.497012,
+   "lon": -0.063268,
+   "osm": "node/27365035"
+  },
+  {
+   "id": "london-borough",
+   "name": "Borough",
+   "aliases": [
+    "The Borough",
+    "Borough Market"
+   ],
+   "lat": 51.501255,
+   "lon": -0.093216,
+   "osm": "node/27553712"
+  },
+  {
+   "id": "london-angel",
+   "name": "Angel",
+   "aliases": [
+    "The Angel"
+   ],
+   "lat": 51.533195,
+   "lon": -0.106114,
+   "osm": "node/4001592822"
+  },
+  {
+   "id": "london-greenwich-town-centre",
+   "name": "Greenwich town centre",
+   "aliases": [],
+   "lat": 51.482084,
+   "lon": -0.004542,
+   "osm": "node/27365302"
+  },
+  {
+   "id": "london-stratford",
+   "name": "Stratford",
+   "aliases": [],
+   "lat": 51.540688,
+   "lon": 0.001621,
+   "osm": "node/27365046"
+  }
+ ],
+ "landmarks": [
+  {
+   "id": "london-regent-street",
+   "name": "Regent Street",
+   "aliases": [],
+   "osm": "way/1018951414"
+  },
+  {
+   "id": "london-strand",
+   "name": "Strand",
+   "aliases": [
+    "Somerset House"
+   ],
+   "osm": "way/200596105"
+  },
+  {
+   "id": "london-liverpool-street",
+   "name": "Liverpool Street",
+   "aliases": [
+    "Liverpool Street station"
+   ],
+   "osm": "node/12286269903"
+  }
+ ]
+}

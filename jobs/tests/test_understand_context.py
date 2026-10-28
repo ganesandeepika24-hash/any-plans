@@ -14,7 +14,15 @@ def context(db_url, city_id="london"):
 
 def test_returns_the_city_and_every_seeded_area_with_coordinates(db_url, sql):
     got = context(db_url)
-    assert got["city"] == {"id": "london", "name": "London", "timezone": "Europe/London"}
+    assert got["city"] == {
+        "id": "london",
+        "name": "London",
+        "timezone": "Europe/London",
+        # The city's centre and radius: the default area (migration 021, decision 0021).
+        "lat": pytest.approx(51.507333),
+        "lon": pytest.approx(-0.127654),
+        "default_radius_km": 10,
+    }
     assert len(got["areas"]) == sql("select count(*) from areas where city_id = 'london'")[0][0]
     soho = next(a for a in got["areas"] if a["id"] == "london-soho")
     lat, lon = sql(
@@ -23,7 +31,7 @@ def test_returns_the_city_and_every_seeded_area_with_coordinates(db_url, sql):
         " from areas where id = 'london-soho'"
     )[0]
     assert (soho["lat"], soho["lon"]) == (pytest.approx(lat), pytest.approx(lon))
-    assert soho["default_radius_km"] == 1 and soho["aliases"] == []
+    assert soho["default_radius_km"] == 1 and soho["aliases"] == ["Chinatown"]  # 0021
     angel = next(a for a in got["areas"] if a["id"] == "london-angel")
     assert angel["aliases"] == ["The Angel"]
 

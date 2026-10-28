@@ -172,6 +172,12 @@ def _area_matches(expected: dict | None, result: UnderstandResult, case: dict, c
     f = result.filters
     if expected is None:
         return f.lat is None
+    if expected.get("city_centre"):  # the default area, or "central London" (0021)
+        return not result.used_location and (f.lat, f.lon, f.radius_km) == (
+            city.centre.lat,
+            city.centre.lon,
+            city.default_radius_km,
+        )
     if "unseeded" in expected:
         return False  # the product should know this place; the parser doesn't yet
     if "point" in expected:
@@ -249,7 +255,8 @@ def _when(when: When | None, now: datetime, city: City, ranges: DateRanges):
 
 
 def _place(place: str | None, city: City) -> str | None:
-    if place is None or normalise(place) == normalise(city.name):
+    """No place, "London" and "central London" all mean the default area (0021)."""
+    if place is None or city.is_city(place):
         return None
     area = city.find_area(place)
     return area.id if area else normalise(place)

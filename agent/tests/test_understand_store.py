@@ -17,7 +17,14 @@ CONFIG_ROWS = [
     {"key": k, "version": 1, "value_json": v} for k, v in migration_config().items() if k in KEYS
 ]
 CONTEXT = {
-    "city": {"id": "london", "name": "London", "timezone": "Europe/London"},
+    "city": {
+        "id": "london",
+        "name": "London",
+        "timezone": "Europe/London",
+        "lat": 51.507333,
+        "lon": -0.127654,
+        "default_radius_km": 10,
+    },
     "areas": [
         {
             "id": "london-soho",
@@ -37,6 +44,7 @@ CONTEXT = {
             "starts_on": "2027-03-09",
             "ends_on": "2027-03-10",
             "estimate": True,
+            "area_id": "london-soho",
         }
     ],
 }
@@ -171,6 +179,27 @@ async def test_city_context_carries_the_calendar():
     )
     assert city.find_date("eid", date(2027, 3, 10)) == eid
     assert city.find_date("eid", date(2027, 3, 11)) is None
+
+
+async def test_city_context_carries_the_centre_and_the_calendars_area():
+    s, http = store(Server())
+    async with http:
+        city = await s.city("london")
+    assert (city.centre.lat, city.centre.lon, city.default_radius_km) == (51.507333, -0.127654, 10)
+    assert city.calendar[0].area_id == "london-soho"
+
+
+async def test_a_context_from_before_021_has_no_default_area():
+    server = Server()
+    server.context = {
+        "city": {"id": "london", "name": "London", "timezone": "Europe/London"},
+        "areas": CONTEXT["areas"],
+        "calendar": [{k: v for k, v in CONTEXT["calendar"][0].items() if k != "area_id"}],
+    }
+    s, http = store(server)
+    async with http:
+        city = await s.city("london")
+    assert (city.centre, city.default_radius_km, city.calendar[0].area_id) == (None, None, None)
 
 
 async def test_a_context_without_a_calendar_has_none():

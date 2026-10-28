@@ -207,3 +207,25 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
 - **Rows 17 and 48** are unchanged.
 - **Model-only scoring** compares the windows each reply means, or the choices a recurring day would offer, with the `date_ranges` config the run uses.
 - **Ceiling with a perfect model:** end to end 57/73 (78.1%), model only 73/73. Rows 15, 16, 21 and 68 pass. Row 36 now fails only on area.
+
+## London areas and the default area (28 Oct 2026, decision 0021)
+
+- **A new area form:** `{"city_centre": true}`, the city's centre and default radius from its row. It covers no place, "London" and "central London".
+- **The default area (step 5 decision 1):** 23 rows change from no area (`null`) to `{"city_centre": true}`: rows 1, 2, 4, 15, 16, 20, 25, 30, 31, 32, 37, 40, 41, 45, 51, 54, 60, 65, 66, 70, 71, 72 and 73. Row 25's `prior` gains the centre, as a search stored after 0021 holds it. Rows 39 and 62 stay `null`: they ask for a location. Rows 23 and 24 don't score area.
+- **"Central London" (decision 2):** rows 34 and 56 change from `{"unseeded": "Central London"}` to `{"city_centre": true}`. Row 56's date still asks for `event_date`.
+- **Places now seeded from OSM:** each changes from `{"unseeded": …}` to `{"id": …}`:
+  - row 12 → `london-bloomsbury`
+  - row 22 → `london-kentish-town`
+  - row 28 → `london-hampstead`
+  - row 33 → `london-wembley`
+  - row 42 → `london-golders-green`
+  - row 52 → `london-whitechapel`
+  - row 53 → `london-southall`
+- **Landmarks (decision 3):**
+  - row 35 → `london-regent-street`
+  - row 36 → `london-strand` (Somerset House is its alias)
+  - row 58 → `london-liverpool-street`
+  - Rows 44 (Richmond Park → Richmond upon Thames) and 46 (Chinatown → Soho) keep their ids and now pass through the aliases. Row 44's note is removed.
+- **Row 55** keeps `london-kensington-and-chelsea`, now reached through the calendar entry's `area_id` (decision 4).
+- **`evals/understand/cases.jsonl`:** 13 parser cases expect `"area": "city_centre"`, and the "London" case also expects the `default_area` note.
+- **Ceiling with a perfect model:** end to end 72/73 (98.6%), model only 73/73. Only row 23 ("Friday night" from 17:00) still fails.

@@ -1,0 +1,268 @@
+{
+ "features": [
+  {
+   "attributes": {
+    "LAD24CD": "E09000001",
+    "LAD24NM": "City of London",
+    "LONG": -0.09352,
+    "LAT": 51.51564
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000002",
+    "LAD24NM": "Barking and Dagenham",
+    "LONG": 0.129479,
+    "LAT": 51.54556
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000003",
+    "LAD24NM": "Barnet",
+    "LONG": -0.2182,
+    "LAT": 51.61107
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000004",
+    "LAD24NM": "Bexley",
+    "LONG": 0.146212,
+    "LAT": 51.45823
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000005",
+    "LAD24NM": "Brent",
+    "LONG": -0.27569,
+    "LAT": 51.56439
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000006",
+    "LAD24NM": "Bromley",
+    "LONG": 0.039246,
+    "LAT": 51.37266
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000007",
+    "LAD24NM": "Camden",
+    "LONG": -0.16291,
+    "LAT": 51.54305
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000008",
+    "LAD24NM": "Croydon",
+    "LONG": -0.07762,
+    "LAT": 51.36599
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000009",
+    "LAD24NM": "Ealing",
+    "LONG": -0.3141,
+    "LAT": 51.52443
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000010",
+    "LAD24NM": "Enfield",
+    "LONG": -0.08144,
+    "LAT": 51.6489
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000011",
+    "LAD24NM": "Greenwich",
+    "LONG": 0.050093,
+    "LAT": 51.46394
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000012",
+    "LAD24NM": "Hackney",
+    "LONG": -0.06046,
+    "LAT": 51.55493
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000013",
+    "LAD24NM": "Hammersmith and Fulham",
+    "LONG": -0.21735,
+    "LAT": 51.48733
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000014",
+    "LAD24NM": "Haringey",
+    "LONG": -0.1067,
+    "LAT": 51.58772
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000015",
+    "LAD24NM": "Harrow",
+    "LONG": -0.33599,
+    "LAT": 51.59467
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000016",
+    "LAD24NM": "Havering",
+    "LONG": 0.235368,
+    "LAT": 51.5652
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000017",
+    "LAD24NM": "Hillingdon",
+    "LONG": -0.44179,
+    "LAT": 51.53664
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000018",
+    "LAD24NM": "Hounslow",
+    "LONG": -0.37855,
+    "LAT": 51.46239
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000019",
+    "LAD24NM": "Islington",
+    "LONG": -0.1099,
+    "LAT": 51.54547
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000020",
+    "LAD24NM": "Kensington and Chelsea",
+    "LONG": -0.18978,
+    "LAT": 51.49645
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000021",
+    "LAD24NM": "Kingston upon Thames",
+    "LONG": -0.28368,
+    "LAT": 51.39296
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000022",
+    "LAD24NM": "Lambeth",
+    "LONG": -0.11385,
+    "LAT": 51.46445
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000023",
+    "LAD24NM": "Lewisham",
+    "LONG": -0.01734,
+    "LAT": 51.4423
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000024",
+    "LAD24NM": "Merton",
+    "LONG": -0.18869,
+    "LAT": 51.41059
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000025",
+    "LAD24NM": "Newham",
+    "LONG": 0.027261,
+    "LAT": 51.5315
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000026",
+    "LAD24NM": "Redbridge",
+    "LONG": 0.070085,
+    "LAT": 51.58588
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000027",
+    "LAD24NM": "Richmond upon Thames",
+    "LONG": -0.28914,
+    "LAT": 51.44035
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000028",
+    "LAD24NM": "Southwark",
+    "LONG": -0.07309,
+    "LAT": 51.46595
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000029",
+    "LAD24NM": "Sutton",
+    "LONG": -0.17227,
+    "LAT": 51.35755
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000030",
+    "LAD24NM": "Tower Hamlets",
+    "LONG": -0.03648,
+    "LAT": 51.51555
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000031",
+    "LAD24NM": "Waltham Forest",
+    "LONG": -0.0188,
+    "LAT": 51.59462
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000032",
+    "LAD24NM": "Wandsworth",
+    "LONG": -0.20022,
+    "LAT": 51.4524
+   }
+  },
+  {
+   "attributes": {
+    "LAD24CD": "E09000033",
+    "LAD24NM": "Westminster",
+    "LONG": -0.15295,
+    "LAT": 51.51222
+   }
+  }
+ ]
+}

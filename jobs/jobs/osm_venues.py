@@ -33,6 +33,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -143,13 +144,28 @@ class Extract:
     skipped: Counter
 
 
-def read_extract(path: Path, boundary_relation: int = BOUNDARY_RELATION) -> Extract:
-    """Read venues inside the boundary relation. Raises ExtractError if the file doesn't
-    parse in full or the boundary can't be built from it."""
+Candidate = tuple[str, dict[str, str], float, float]  # source_id, tags, lat, lon
+
+
+@dataclass
+class Scan:
+    """Nodes and ways whose tags `wanted` accepts, with the boundary to test them against.
+    Relations are counted and skipped, as Overpass's `out center` would need them built."""
+
+    candidates: list[Candidate]
+    boundary: Any  # a prepared shapely geometry: boundary.covers(Point(lon, lat))
+    fetched: int
+    skipped: Counter
+
+
+def scan(path: Path, wanted: Callable[[dict[str, str]], bool], boundary_relation: int) -> Scan:
+    """Read the features `wanted` accepts and build the boundary relation. Raises
+    ExtractError if the file doesn't parse in full or the boundary can't be built from it.
+    Shared by the venues job and the area seed (decision 0021)."""
     fetched, skipped = 0, Counter()
     outer, inner = set(), set()
     boundary_found = False
-    candidates: list[tuple[str, dict[str, str], float, float]] = []
+    candidates: list[Candidate] = []
     boundary_lines: dict[int, LineString] = {}
     try:
         for rel in osmium.FileProcessor(str(path), osmium.osm.RELATION):
@@ -160,7 +176,7 @@ def read_extract(path: Path, boundary_relation: int = BOUNDARY_RELATION) -> Extr
                         outer.add(m.ref)
                     elif m.type == "w" and m.role == "inner":
                         inner.add(m.ref)
-            elif kind_of(dict(rel.tags)) is not None:
+            elif wanted(dict(rel.tags)):
                 fetched += 1
                 skipped["multipolygon"] += 1
 
@@ -171,7 +187,7 @@ def read_extract(path: Path, boundary_relation: int = BOUNDARY_RELATION) -> Extr
                 if len(points) == len(obj.nodes) and len(points) >= 2:
                     boundary_lines[obj.id] = LineString(points)
             tags = dict(obj.tags)
-            if kind_of(tags) is None:
+            if not wanted(tags):
                 continue
             fetched += 1
             if obj.is_node():
@@ -192,17 +208,24 @@ def read_extract(path: Path, boundary_relation: int = BOUNDARY_RELATION) -> Extr
         raise ExtractError(f"the extract didn't parse: {error}") from None
 
     area = _boundary(boundary_relation, boundary_found, outer, inner, boundary_lines)
-    inside = prep(area)
+    return Scan(candidates, prep(area), fetched, skipped)
+
+
+def read_extract(path: Path, boundary_relation: int = BOUNDARY_RELATION) -> Extract:
+    """Read venues inside the boundary relation. Raises ExtractError if the file doesn't
+    parse in full or the boundary can't be built from it."""
+    found_features = scan(path, lambda tags: kind_of(tags) is not None, boundary_relation)
+    skipped = found_features.skipped
     venues = []
-    for source_id, tags, lat, lon in candidates:
+    for source_id, tags, lat, lon in found_features.candidates:
         found = venue(source_id, tags, lat, lon)
         if found is None:
             skipped["unnamed"] += 1
-        elif not inside.covers(Point(lon, lat)):
+        elif not found_features.boundary.covers(Point(lon, lat)):
             skipped["outside boundary"] += 1
         else:
             venues.append(found)
-    return Extract(venues=venues, fetched=fetched, skipped=skipped)
+    return Extract(venues=venues, fetched=found_features.fetched, skipped=skipped)
 
 
 def _boundary(relation, found, outer, inner, lines):
