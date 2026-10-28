@@ -34,7 +34,17 @@ WhenKind = Literal[
     "weekday",
     "date",
     "holiday",
+    # Spans (decision 0020): code works out the days, and a recurring day with no count
+    # or month asks which ones.
+    "month",
+    "this_month",
+    "next_month",
+    "range",
+    "season",
+    "every_weekday",
+    "every_weekend",
 ]
+Season = Literal["winter", "spring", "summer", "autumn"]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 # The PRD's vibe and who chips (round 2, decision 0015). They describe the outing, not
 # the kind of event, so a search with one of them needs no category question.
@@ -50,27 +60,50 @@ class _Strict(BaseModel):
 
 
 class When(_Strict):
+    """The fields after holiday came with prompt v6 (decision 0020). They default to null,
+    so replies from earlier prompts still validate."""
+
     kind: WhenKind
-    weekday: Weekday | None  # with kind weekday, or alongside a date ("Friday 6 November")
+    weekday: Weekday | None  # kind weekday or every_weekday, or with a date
     qualifier: Literal["this", "next"] | None  # "this Thursday", "next Friday"
-    month: int | None = Field(ge=1, le=12)
+    month: int | None = Field(ge=1, le=12)  # a date's, a range's start, a month
     day: int | None = Field(ge=1, le=31)
     holiday: Holiday | None
+    end_month: int | None = Field(default=None, ge=1, le=12)  # a range's last day
+    end_day: int | None = Field(default=None, ge=1, le=31)
+    season: Season | None = None
+    count: int | None = Field(default=None, ge=1, le=12)  # "the next 4 Saturdays"
+    within: Literal["this_month", "next_month"] | None = None  # "Saturdays this month"
 
     @model_validator(mode="after")
     def _parts_match_kind(self) -> Self:
-        if self.kind == "weekday" and self.weekday is None:
-            raise ValueError("kind 'weekday' needs a weekday")
-        if self.weekday is not None and self.kind not in ("weekday", "date"):
-            raise ValueError("weekday goes only with kind 'weekday' or 'date'")
-        if self.qualifier is not None and self.weekday is None:
-            raise ValueError("qualifier goes only with a weekday")
-        if ((self.month, self.day) != (None, None)) != (self.kind == "date"):
-            raise ValueError("month and day are set exactly when kind is 'date'")
-        if self.kind == "date" and None in (self.month, self.day):
-            raise ValueError("a date needs both month and day")
+        every = self.kind in ("every_weekday", "every_weekend")
+        if self.kind in ("weekday", "every_weekday") and self.weekday is None:
+            raise ValueError(f"kind '{self.kind}' needs a weekday")
+        if self.weekday is not None and self.kind not in ("weekday", "date", "every_weekday"):
+            raise ValueError("weekday goes only with kind 'weekday', 'date' or 'every_weekday'")
+        if self.qualifier is not None and (self.weekday is None or self.kind == "every_weekday"):
+            raise ValueError("qualifier goes only with a weekday or a date's weekday")
+        needs_day = self.kind in ("date", "range")
+        if (self.day is not None) != needs_day:
+            raise ValueError("day is set exactly when kind is 'date' or 'range'")
+        if needs_day or self.kind == "month":
+            if self.month is None:
+                raise ValueError(f"kind '{self.kind}' needs a month")
+        elif self.month is not None and not every:
+            raise ValueError("month goes only with a date, a range, a month or a recurring day")
+        if ((self.end_month, self.end_day) != (None, None)) != (self.kind == "range"):
+            raise ValueError("end_month and end_day are set exactly when kind is 'range'")
+        if self.kind == "range" and None in (self.end_month, self.end_day):
+            raise ValueError("a range needs both end_month and end_day")
         if (self.holiday is not None) != (self.kind == "holiday"):
             raise ValueError("holiday is set exactly when kind is 'holiday'")
+        if (self.season is not None) != (self.kind == "season"):
+            raise ValueError("season is set exactly when kind is 'season'")
+        if (self.count is not None or self.within is not None) and not every:
+            raise ValueError("count and within go only with a recurring day")
+        if every and sum(v is not None for v in (self.count, self.within, self.month)) > 1:
+            raise ValueError("a recurring day takes one of count, within and month")
         return self
 
 
@@ -126,8 +159,12 @@ class RefineReply(UnderstoodQuery):
     distance_change: DistanceChange | None  # "somewhere closer", "further out is fine"
 
 
+AGENT_ONLY_FILTERS = ("windows",)
+
+
 class SearchFilters(BaseModel):
-    """search_items' filters, key for key (migration 010; a test compares them)."""
+    """search_items' filters, key for key (migration 010; a test compares them), plus
+    AGENT_ONLY_FILTERS, which the Search node applies itself."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -141,6 +178,10 @@ class SearchFilters(BaseModel):
     lon: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float | None = Field(default=None, gt=0, le=100)
     limit: int | None = Field(default=None, ge=1, le=100)
+    # The agent's own key, not search_items': the days inside date_from to date_to that
+    # count ("the next 4 Saturdays", decision 0020). The Search node keeps only events
+    # on during one of them.
+    windows: list[tuple[AwareDatetime, AwareDatetime]] | None = Field(default=None, min_length=2)
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -152,17 +193,28 @@ class SearchFilters(BaseModel):
             and self.price_min > self.price_max
         ):
             raise ValueError("price_min must not exceed price_max")
+        if self.windows is not None:
+            if self.date_from is None or self.date_to is None:
+                raise ValueError("windows need date_from and date_to")
+            bounds = [t for w in self.windows for t in w]
+            if bounds != sorted(bounds) or any(a >= b for a, b in self.windows):
+                raise ValueError("windows must be in order and not overlap")
+            if bounds[0] < self.date_from or bounds[-1] > self.date_to:
+                raise ValueError("windows must fall inside date_from to date_to")
         place = (self.lat, self.lon, self.radius_km)
         if any(v is not None for v in place) and any(v is None for v in place):
             raise ValueError("lat, lon and radius_km go together")
         return self
 
     def to_json(self) -> dict[str, Any]:
-        """The jsonb argument for search_items: only the keys that are set."""
+        """The filters as JSON: only the keys that are set. search_items takes all but
+        `windows`, which the Search node takes off first."""
         out = self.model_dump(exclude_none=True)
         for key in ("date_from", "date_to"):
             if key in out:
                 out[key] = _iso(out[key])
+        if "windows" in out:
+            out["windows"] = [[_iso(a), _iso(b)] for a, b in out["windows"]]
         return out
 
 

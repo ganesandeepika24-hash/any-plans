@@ -12,6 +12,7 @@ import pytest
 
 from app.understand.llm import LLMError
 from app.understand.node import Understander
+from app.understand.resolve import DateRanges
 from app.understand.schema import Vibe, Who
 from tests.understand_support import (
     REPO,
@@ -20,6 +21,7 @@ from tests.understand_support import (
     RecordingTracer,
     entries,
     london,
+    migration_config,
     seed_areas,
 )
 
@@ -31,22 +33,20 @@ CASES = run_evals.load_cases()
 BY_ROW = {c["row"]: c for c in CASES}
 CITY = london()
 REASONS = {"location", "date", "budget", "price_basis", "event_date", "category"}
-VERSIONS = {"llm_understand": 2, "understand_prompt": 5, "refine_prompt": 2}  # what ships
+VERSIONS = {"llm_understand": 2, "understand_prompt": 6, "refine_prompt": 3}  # what ships
+RANGES = DateRanges.model_validate(migration_config()["date_ranges"])
 
 # What a perfect model still fails end to end today: resolver and calendar gaps, each
 # named in decision 0014. When the resolver learns one, move it out of this list.
 CEILING_FAILURES = {
     12: ["area"],  # Bloomsbury isn't a seeded area
-    15: ["date"],  # "any Saturday" isn't a filter
-    16: ["date"],  # "any weekend"
-    21: ["date"],  # months
     22: ["area"],  # Kentish Town
     23: ["date"],  # "Friday night" starts at 17:00; a weekday is the whole day
     28: ["area"],  # Hampstead
     33: ["area"],  # Wembley
     34: ["area"],  # central London
     35: ["area"],  # Regent Street
-    36: ["date", "area"],  # "this winter"; Somerset House
+    36: ["area"],  # Somerset House
     42: ["area"],  # Golders Green
     44: ["area"],  # Richmond Park isn't an area name
     46: ["area"],  # Chinatown
@@ -55,7 +55,6 @@ CEILING_FAILURES = {
     55: ["area"],  # the Chelsea Flower Show's venue
     56: ["area"],  # central London
     58: ["area"],  # Liverpool Street
-    68: ["date"],  # date ranges
 }
 
 
@@ -68,7 +67,9 @@ def run(cases, script, max_calls=80, providers=1, tracer=None):
             "providers"
         ][:1]
     understander = Understander(store, llm, tracer or RecordingTracer(), clock=clock)
-    results = asyncio.run(run_evals.run_cases(cases, understander, llm, clock, CITY, providers))
+    results = asyncio.run(
+        run_evals.run_cases(cases, understander, llm, clock, CITY, providers, RANGES)
+    )
     return results, llm
 
 
@@ -179,7 +180,7 @@ def test_a_perfect_model_fails_end_to_end_only_on_known_resolver_gaps():
     }
     assert failed == CEILING_FAILURES
     summary = run_evals.summarise(results)
-    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (53, 73)
+    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (57, 73)
 
 
 # Scoring catches mistakes ----------------------------------------------------------
@@ -578,7 +579,11 @@ def test_a_real_run_paces_groq_and_reports_tokens(monkeypatch, tmp_path):
     summary = json.loads(out.read_text())["summary"]
     assert (summary["tokens"], summary["paced_wait_s"]) == ({}, 0.0)
     assert (summary["rate_limit_retries"], summary["stopped"]) == (0, None)
-    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 5}
+    assert summary["config_versions"] == {
+        "llm_understand": 2,
+        "understand_prompt": 6,
+        "date_ranges": 1,
+    }
 
 
 def test_supabase_config_needs_its_keys(monkeypatch, tmp_path):
@@ -598,14 +603,14 @@ def test_max_calls_above_80_is_refused():
 def test_the_report_gives_both_numbers_and_the_failures():
     results, _ = run(CASES, perfect(CASES))
     text = run_evals.report(run_evals.summarise(results), results)
-    assert "end to end: 72.6% (53/73 cases)" in text
+    assert "end to end: 78.1% (57/73 cases)" in text
     assert "model only: 100.0% (73/73 cases)" in text
-    assert "r68 '14 to 15 November, Shoreditch': date | -" in text
+    assert "r23 'Friday night within a mile of Old Street (pin at Old Street)': date | -" in text
 
 
 def test_scores_go_to_langfuse_with_versions_and_failed_fields():
     tracer = RecordingTracer()
-    results, _ = run([BY_ROW[64], BY_ROW[68]], perfect([BY_ROW[64], BY_ROW[68]]), tracer=tracer)
+    results, _ = run([BY_ROW[64], BY_ROW[23]], perfect([BY_ROW[64], BY_ROW[23]]), tracer=tracer)
     seen = []
 
     def handler(request):
@@ -624,10 +629,10 @@ def test_scores_go_to_langfuse_with_versions_and_failed_fields():
     assert {p for p, _, _ in seen} == {"/api/public/scores"}
     assert all(auth.startswith("Basic ") for _, auth, _ in seen)
     bodies = {(b["metadata"]["case"], b["name"]): b for _, _, b in seen}
-    e2e = bodies[("r68", "parse_end_to_end")]
+    e2e = bodies[("r23", "parse_end_to_end")]
     assert (e2e["value"], e2e["comment"]) == (0, "failed: date")
     assert e2e["traceId"] == results[1].trace_id
-    assert e2e["metadata"]["understand_prompt_version"] == 5
+    assert e2e["metadata"]["understand_prompt_version"] == 6
     assert e2e["metadata"]["llm_understand_version"] == 2
     assert bodies[("r64", "parse_model_only")]["value"] == 1
 

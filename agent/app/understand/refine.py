@@ -25,7 +25,9 @@ from app.understand.resolve import (
     LOCATION_RADIUS_KM,
     MAX_RADIUS_KM,
     MISSING_ORDER,
+    NO_RANGES,
     City,
+    DateRanges,
     Missing,
     Note,
     Point,
@@ -35,7 +37,7 @@ from app.understand.resolve import (
 from app.understand.schema import RefineReply, SearchFilters, UnderstoodQuery
 
 STEPS_KEY = "refine_steps"
-_DATE_KEYS = ("date_from", "date_to")
+_DATE_KEYS = ("date_from", "date_to", "windows")
 _PLACE_KEYS = ("lat", "lon", "radius_km")
 _PRICE_KEYS = ("price_min", "price_max", "include_unpriced")
 
@@ -77,13 +79,14 @@ def apply(
     city: City,
     steps: RefineSteps,
     location: Point | None = None,
+    ranges: DateRanges = NO_RANGES,
 ) -> Refinement:
     said = UnderstoodQuery.model_validate(
         reply.model_dump(exclude={"price_change", "distance_change", "distance"})
         | {"distance": None}
     )
     # What the follow-up says on its own, resolved as a search would be.
-    fresh = resolve(said, now, city, location)
+    fresh = resolve(said, now, city, location, ranges)
     new = fresh.filters.model_dump(exclude_none=True)
     f = dict(prior.filters)
     notes: list[Note] = list(fresh.notes)
@@ -150,6 +153,7 @@ def apply(
         tuple(m for m in MISSING_ORDER if m in missing),
         used_location,
         source,
+        fresh.date_choices if "date" in missing else (),
     )
     return Refinement(resolution, reply.vibe or prior.vibe, reply.who or prior.who)
 

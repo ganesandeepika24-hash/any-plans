@@ -199,3 +199,11 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
 - **Rows 34 and 57:** notes updated. Row 34 resolves from the calendar. Row 57 asks for `event_date` because the 2027 Carnival date isn't confirmed, so the calendar leaves it out.
 - **No new rows.** The festival doc's "Diwali on Sunday 8 November" is a resolver test instead, so the set stays at 73 and the baseline comparison stays fair.
 - **Ceiling with a perfect model:** end to end 53/73 (72.6%), model only 73/73. Rows 47, 48, 49 and 57 pass. Rows 34, 42, 46, 52, 53 and 55 now fail only on area.
+
+## Date ranges (28 Oct 2026, decision 0020)
+
+- **Rows 15 and 16** ("Hamilton on a Saturday", "Wicked on any weekend") change from `unsupported` to `needs_clarification` with `missing: ["date"]`. A recurring phrase asks which dates, offering "Next 4 Saturdays" (or weekends), "This month" and "Pick a month", which `unscored.choices` records. Their replies are `every_weekday` (Saturday) and `every_weekend`. No row is `unsupported` now.
+- **Rows 21, 36 and 68:** replies now use the new kinds (`month`, `season`, `range`) with nothing unclear. Expected windows are unchanged: all of March 2027, 1 Nov to 31 Jan, and 14 to 15 November.
+- **Rows 17 and 48** are unchanged.
+- **Model-only scoring** compares the windows each reply means, or the choices a recurring day would offer, with the `date_ranges` config the run uses.
+- **Ceiling with a perfect model:** end to end 57/73 (78.1%), model only 73/73. Rows 15, 16, 21 and 68 pass. Row 36 now fails only on area.

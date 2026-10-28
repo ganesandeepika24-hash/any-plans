@@ -304,6 +304,16 @@ def test_other_questions_have_no_groups():
         assert q.groups == ()
 
 
+def test_a_recurring_day_asks_which_dates_with_its_choices():
+    u = understood(keywords="Hamilton", when=when("every_weekday", "sat"))
+    choices = ("Next 4 Saturdays", "This month", "Pick a month")
+    (q,) = questions(("date",), u, CITY.name, choices)
+    assert (q.question, q.choices, q.groups) == ("Hamilton: which dates?", choices, ())
+    # Without choices it's the plain date question.
+    (q,) = questions(("date",), u, CITY.name)
+    assert (q.question, q.choices) == ("Hamilton: which date do you mean?", ())
+
+
 def test_price_basis_and_event_date_questions():
     u = understood(keywords="christmas market", price_max=60, price_scope="total")
     (q,) = questions(("price_basis",), u, CITY.name)

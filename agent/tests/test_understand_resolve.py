@@ -5,12 +5,13 @@ from itertools import pairwise
 
 import pytest
 
-from app.understand.resolve import date_window, normalise, resolve
-from app.understand.schema import UnderstoodQuery, When
-from tests.understand_support import london, reply, when
+from app.understand.resolve import NO_RANGES, DateRanges, date_window, normalise, resolve
+from app.understand.schema import SearchFilters, UnderstoodQuery, When
+from tests.understand_support import london, migration_config, reply, when
 
 CITY = london()
 TZ = CITY.tz
+RANGES = DateRanges.model_validate(migration_config()["date_ranges"])
 WED_EVENING = datetime.fromisoformat("2026-10-28T20:00:00+00:00")  # GMT since 25 Oct
 SAT_2AM = datetime.fromisoformat("2026-10-31T02:00:00+00:00")
 SUN_AFTERNOON = datetime.fromisoformat("2026-11-01T15:00:00+00:00")
@@ -271,6 +272,269 @@ def test_calendar_seed_parsing_matches_the_database_shape():
     assert len(CITY.calendar) == 12
     assert all(d.first <= d.last for d in CITY.calendar)
     assert [d.id for d in CITY.calendar if d.estimate] == ["london-2027-eid-al-fitr"]
+
+
+# Spans (decision 0020) -------------------------------------------------------------
+
+
+def iso(d):
+    return d.isoformat() if d else None
+
+
+def spans(w, now=WED_EVENING, ranges=RANGES):
+    """The resolved dates as (date_from, date_to, windows, missing, choices, notes)."""
+    r = resolve(understood(when=w), now, CITY, ranges=ranges)
+    f = r.filters
+    windows = [(iso(a), iso(b)) for a, b in f.windows] if f.windows else None
+    return (
+        iso(f.date_from),
+        iso(f.date_to),
+        windows,
+        r.missing,
+        r.date_choices,
+        [n.code for n in r.notes],
+    )
+
+
+def dates(w, now=WED_EVENING, ranges=RANGES):
+    return spans(w, now, ranges)[:2]
+
+
+@pytest.mark.parametrize(
+    ("w", "now", "expected"),
+    [
+        # A later month this year; across the clock change at the end of March.
+        (
+            when("month", month=3),
+            WED_EVENING,
+            ("2027-03-01T05:00:00+00:00", "2027-04-01T05:00:00+01:00"),
+        ),
+        # This month: from now.
+        (
+            when("month", month=10),
+            WED_EVENING,
+            ("2026-10-28T20:00:00+00:00", "2026-11-01T05:00:00+00:00"),
+        ),
+        # A month that's over this year is next year's.
+        (
+            when("month", month=9),
+            WED_EVENING,
+            ("2027-09-01T05:00:00+01:00", "2027-10-01T05:00:00+01:00"),
+        ),
+        # December runs into January.
+        (
+            when("month", month=12),
+            WED_EVENING,
+            ("2026-12-01T05:00:00+00:00", "2027-01-01T05:00:00+00:00"),
+        ),
+        (
+            when("this_month"),
+            WED_EVENING,
+            ("2026-10-28T20:00:00+00:00", "2026-11-01T05:00:00+00:00"),
+        ),
+        (
+            when("next_month"),
+            WED_EVENING,
+            ("2026-11-01T05:00:00+00:00", "2026-12-01T05:00:00+00:00"),
+        ),
+        (
+            when("next_month"),
+            datetime.fromisoformat("2026-12-10T12:00:00+00:00"),
+            ("2027-01-01T05:00:00+00:00", "2027-02-01T05:00:00+00:00"),
+        ),
+    ],
+)
+def test_a_month_is_the_whole_month_from_now(w, now, expected):
+    assert dates(w, now) == expected
+
+
+@pytest.mark.parametrize(
+    ("w", "expected"),
+    [
+        # Row 68: both days included.
+        (
+            when("range", month=11, day=14, end_month=11, end_day=15),
+            ("2026-11-14T05:00:00+00:00", "2026-11-16T05:00:00+00:00"),
+        ),
+        # Across the new year.
+        (
+            when("range", month=12, day=28, end_month=1, end_day=2),
+            ("2026-12-28T05:00:00+00:00", "2027-01-03T05:00:00+00:00"),
+        ),
+        # Under way: from now to the end.
+        (
+            when("range", month=10, day=26, end_month=10, end_day=30),
+            ("2026-10-28T20:00:00+00:00", "2026-10-31T05:00:00+00:00"),
+        ),
+    ],
+)
+def test_a_range_includes_both_days(w, expected):
+    assert dates(w) == expected
+
+
+def test_a_range_longer_than_config_allows_asks():
+    w = when("range", month=11, day=1, end_month=1, end_day=31)  # 92 days, over 62
+    assert spans(w)[2:4] == (None, ("date",))
+
+
+def test_a_range_ending_on_a_day_that_does_not_exist_is_dropped_with_a_note():
+    w = when("range", month=2, day=1, end_month=2, end_day=30)
+    assert spans(w)[:2] == (None, None) and spans(w)[5] == ["no_such_date"]
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        # Row 36, from before winter.
+        (WED_EVENING, ("2026-11-01T05:00:00+00:00", "2027-02-01T05:00:00+00:00")),
+        # From inside it.
+        (
+            datetime.fromisoformat("2026-12-10T12:00:00+00:00"),
+            ("2026-12-10T12:00:00+00:00", "2027-02-01T05:00:00+00:00"),
+        ),
+        # After it: next winter.
+        (
+            datetime.fromisoformat("2027-02-05T12:00:00+00:00"),
+            ("2027-11-01T05:00:00+00:00", "2028-02-01T05:00:00+00:00"),
+        ),
+    ],
+)
+def test_winter_comes_from_config(now, expected):
+    assert dates(when("season", season="winter"), now) == expected
+
+
+@pytest.mark.parametrize(("season", "ranges"), [("summer", RANGES), ("winter", NO_RANGES)])
+def test_a_season_with_no_dates_in_config_asks(season, ranges):
+    assert spans(when("season", season=season), ranges=ranges)[:4] == (None, None, None, ("date",))
+
+
+@pytest.mark.parametrize(
+    ("w", "choices"),
+    [
+        (when("every_weekday", "sat"), ("Next 4 Saturdays", "This month", "Pick a month")),
+        (when("every_weekday", "fri"), ("Next 4 Fridays", "This month", "Pick a month")),
+        (when("every_weekend"), ("Next 4 weekends", "This month", "Pick a month")),
+    ],
+)
+def test_a_recurring_day_with_no_count_or_month_asks_with_choices(w, choices):
+    assert spans(w)[:5] == (None, None, None, ("date",), choices)
+
+
+def test_the_choice_count_comes_from_config():
+    three = RANGES.model_copy(update={"choice_count": 3})
+    assert spans(when("every_weekend"), ranges=three)[4][0] == "Next 3 weekends"
+
+
+def test_the_next_4_saturdays_are_four_windows_in_one_span():
+    assert spans(when("every_weekday", "sat", count=4)) == (
+        "2026-10-31T05:00:00+00:00",
+        "2026-11-22T05:00:00+00:00",
+        [
+            ("2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00"),
+            ("2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"),
+            ("2026-11-14T05:00:00+00:00", "2026-11-15T05:00:00+00:00"),
+            ("2026-11-21T05:00:00+00:00", "2026-11-22T05:00:00+00:00"),
+        ],
+        (),
+        (),
+        [],
+    )
+
+
+def test_on_a_saturday_the_first_of_the_next_saturdays_is_today_from_now():
+    sat_afternoon = datetime.fromisoformat("2026-10-31T15:00:00+00:00")
+    windows = spans(when("every_weekday", "sat", count=2), sat_afternoon)[2]
+    assert windows == [
+        ("2026-10-31T15:00:00+00:00", "2026-11-01T05:00:00+00:00"),
+        ("2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"),
+    ]
+    # At 02:00 on Saturday it's still Friday night, so Saturday is still to come.
+    assert spans(when("every_weekday", "sat", count=1), SAT_2AM)[:2] == (
+        "2026-10-31T05:00:00+00:00",
+        "2026-11-01T05:00:00+00:00",
+    )
+
+
+def test_weekends_run_from_friday_evening_and_include_the_one_under_way():
+    assert spans(when("every_weekend", count=2))[2] == [
+        ("2026-10-30T17:00:00+00:00", "2026-11-02T05:00:00+00:00"),
+        ("2026-11-06T17:00:00+00:00", "2026-11-09T05:00:00+00:00"),
+    ]
+    assert spans(when("every_weekend", count=1), SUN_AFTERNOON)[:2] == (
+        "2026-11-01T15:00:00+00:00",
+        "2026-11-02T05:00:00+00:00",
+    )
+
+
+def test_saturdays_this_month_next_month_and_in_a_named_month():
+    # One Saturday left in October: a single window, so no windows list.
+    assert spans(when("every_weekday", "sat", within="this_month"))[:3] == (
+        "2026-10-31T05:00:00+00:00",
+        "2026-11-01T05:00:00+00:00",
+        None,
+    )
+    assert [a[:10] for a, _ in spans(when("every_weekday", "sat", within="next_month"))[2]] == [
+        "2026-11-07",
+        "2026-11-14",
+        "2026-11-21",
+        "2026-11-28",
+    ]
+    assert [a[:10] for a, _ in spans(when("every_weekday", "sat", month=3))[2]] == [
+        "2027-03-06",
+        "2027-03-13",
+        "2027-03-20",
+        "2027-03-27",
+    ]
+
+
+def test_no_saturdays_left_this_month_asks_again_rather_than_dropping_dates():
+    last_sunday = datetime.fromisoformat("2027-01-31T12:00:00+00:00")
+    assert spans(when("every_weekday", "sat", within="this_month"), last_sunday)[:5] == (
+        None,
+        None,
+        None,
+        ("date",),
+        ("Next 4 Saturdays", "This month", "Pick a month"),
+    )
+
+
+def test_too_many_recurring_days_stop_at_the_config_limit_with_a_note():
+    got = spans(when("every_weekday", "sat", count=12))
+    assert len(got[2]) == RANGES.max_count and got[5] == ["count_capped"]
+
+
+def test_date_window_refuses_a_recurring_day():
+    with pytest.raises(ValueError, match="date_windows"):
+        date_window(When(**when("every_weekday", "sat", count=2)), WED_EVENING, TZ)
+
+
+@pytest.mark.parametrize(
+    "windows",
+    [
+        [("2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00")],  # only one
+        [  # out of order
+            ("2026-11-07T05:00:00+00:00", "2026-11-08T05:00:00+00:00"),
+            ("2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00"),
+        ],
+        [  # outside date_from to date_to
+            ("2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00"),
+            ("2026-12-05T05:00:00+00:00", "2026-12-06T05:00:00+00:00"),
+        ],
+    ],
+)
+def test_windows_must_be_several_in_order_and_inside_the_span(windows):
+    with pytest.raises(ValueError):
+        SearchFilters(
+            date_from="2026-10-31T05:00:00+00:00",
+            date_to="2026-11-22T05:00:00+00:00",
+            windows=windows,
+        )
+
+
+def test_windows_round_trip_through_json():
+    f = resolve(understood(when=when("every_weekday", "sat", count=2)), WED_EVENING, CITY).filters
+    assert SearchFilters(**f.to_json()) == f
+    assert f.to_json()["windows"][0] == ["2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00"]
 
 
 # Places ----------------------------------------------------------------------------
