@@ -50,10 +50,17 @@ class AmbiguousDate(Exception):
     """The date could mean more than one day, or its parts disagree."""
 
 
+LocationSource = Literal["device", "pin"]
+
+
 @dataclass(frozen=True)
 class Point:
     lat: float
     lon: float
+    # For the user's own point: "device" (read once from the browser, with permission, for
+    # "near me") or "pin" (dropped on the map). None for area centres, or when the app
+    # doesn't say (decision 0017).
+    source: LocationSource | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +103,7 @@ class Resolution:
     notes: tuple[Note, ...]
     missing: tuple[Missing, ...] = ()
     used_location: bool = False  # lat and lon are the user's own point: never stored
+    location_source: LocationSource | None = None  # that point's source, when used
 
 
 def normalise(name: str) -> str:
@@ -142,6 +150,7 @@ def resolve(
         tuple(notes),
         tuple(m for m in MISSING_ORDER if m in missing),
         used_location,
+        location.source if used_location and location is not None else None,
     )
 
 

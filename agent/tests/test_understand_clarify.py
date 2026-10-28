@@ -201,6 +201,26 @@ def test_near_me_without_a_location_asks():
     assert days(r) == ("2026-10-27T17:00:00+00:00", "2026-10-28T05:00:00+00:00")
 
 
+@pytest.mark.parametrize("source", ["device", "pin", None])
+def test_the_users_point_keeps_its_source(source):
+    loc = Point(WATERLOO.lat, WATERLOO.lon, source)
+    r = run(location=loc, near_me=True, when=when("tonight"))
+    assert (r.used_location, r.location_source) == (True, source)
+
+
+def test_a_vague_request_near_the_device_still_asks_for_a_category():
+    # Row 61, near-me decision: the location is known, the kind of thing isn't.
+    device = Point(WATERLOO.lat, WATERLOO.lon, "device")
+    r = run(location=device, near_me=True, unclear=["category"], when=when("tonight"))
+    assert r.missing == ("category",) and r.location_source == "device"
+    assert (r.filters.lat, r.filters.lon) == (WATERLOO.lat, WATERLOO.lon)
+
+
+def test_an_area_centre_has_no_source():
+    r = run(location=Point(WATERLOO.lat, WATERLOO.lon, "device"), place="Soho")
+    assert (r.used_location, r.location_source) == (False, None)
+
+
 def test_near_me_with_a_location_uses_it_at_one_mile():
     r = run(location=WATERLOO, near_me=True, when=when("tonight"))
     assert r.missing == () and r.used_location

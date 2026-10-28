@@ -5,14 +5,14 @@
 73 hand-written searches from the project docs (decision 0014), one per line:
 
 - `id`, `row` (the docs' row number), `uc` (use case, or null), `tag` (`synthetic`), `source` (the doc it comes from).
-- `query`, `now` (frozen at Tue 27 Oct 2026 12:00 London), `location` (a pin or the user's position, or null).
+- `query`, `now` (frozen at Tue 27 Oct 2026 12:00 London), `location` (a pin or the user's position, or null). A location may carry `source`: `device` or `pin` (decision 0017).
 - `skip`: why the row doesn't run (`needs_prior_filters` for the refine rows 25 and 26), or null.
 - `scored`: the fields scored for this row: `date`, `area`, `budget`, `category`, `radius` only when the user states a distance, and `vibe` and `who` on the rows that test them (decision 0015).
 - `reply`: the `UnderstoodQuery` a good model should return. `also_accept`: changes to `reply` that are also right.
 - `expected`: what the product should do, written by hand from the docs, never by running the resolver:
   - `status` and `missing`: the clarify reasons.
   - `date`: a list of acceptable options, each `{window, missing}` (a window of two ISO times, or null for no date filter), or `{unsupported}` for something no filter can express yet.
-  - `area`: `{id}` (a seeded area), `{unseeded}` (a place the product should know but doesn't), `{point}` (the request's location), or null.
+  - `area`: `{id}` (a seeded area), `{unseeded}` (a place the product should know but doesn't), `{point}` (the request's location, with `source` when it must be marked device or pin), or null.
   - `budget`: `price_min`, `price_max`, `include_unpriced`. `categories`. `radius_km` (only when stated).
   - `vibe` and `who`: the acceptable values (a list, which may include null), only where they're scored.
 - `unscored`: actions, chips, plan checks, and who or vibe on rows that don't score them, from the docs: recorded, not scored.

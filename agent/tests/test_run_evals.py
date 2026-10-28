@@ -65,7 +65,7 @@ CEILING_FAILURES = {
 def run(cases, script, max_calls=80, providers=1, tracer=None):
     llm = run_evals.CountingLLM(FakeLLM(**script), max_calls)
     clock = run_evals.Clock()
-    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 3}))
+    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 4}))
     if providers == 1:
         store.entries["llm_understand"].value["providers"] = store.entries["llm_understand"].value[
             "providers"
@@ -148,7 +148,8 @@ def test_expectations_are_well_formed():
         (56, ["event_date"]),
         (57, ["event_date"]),
         (60, ["price_basis"]),
-        (61, ["location"]),
+        (61, ["category"]),  # near-me decision: the device location, a vague request
+        (63, ["category"]),  # the same with a dropped pin
         (62, ["location", "date"]),
         (71, ["category"]),
     ],
@@ -158,7 +159,7 @@ def test_the_docs_clarify_rows(row, missing):
 
 
 def test_the_docs_clear_rows_resolve():
-    for row in (22, 63, 64, 65, 66, 67, 69, 70, 72, 73):
+    for row in (22, 64, 65, 66, 67, 69, 70, 72, 73):
         assert BY_ROW[row]["expected"]["status"] == "ok", row
 
 
@@ -201,7 +202,7 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         (71, {"unclear": []}, "category"),
         (27, {"unclear": []}, "budget"),
         (60, {"price_scope": "each"}, "budget"),
-        (61, {"near_me": False}, "area"),
+        (62, {"near_me": False}, "area"),
         (5, {"unclear": []}, "date"),
         (19, {"free": False, "price_max": 0}, "budget"),  # "under £0" isn't "free"
         (14, {"vibe": None}, "vibe"),
@@ -249,6 +250,26 @@ def test_another_spelling_of_the_same_area_scores_as_the_same():
 def test_also_accept_variants_count_for_model_only():
     results, _ = run([BY_ROW[60]], {"groq": [answer(60, unclear=[])], "cloudflare": []})
     assert all(results[0].model_only.values()) and all(results[0].end_to_end.values())
+
+
+def test_the_near_me_rows_send_a_marked_location():
+    assert BY_ROW[61]["location"]["source"] == "device"
+    assert BY_ROW[63]["location"]["source"] == "pin"
+    assert BY_ROW[62]["location"] is None  # permission refused: it asks where
+    assert BY_ROW[62]["expected"]["missing"] == ["location", "date"]
+
+
+def test_a_point_with_the_wrong_source_fails_area_end_to_end():
+    case = json.loads(json.dumps(BY_ROW[61]))
+    case["location"]["source"] = "pin"  # the app said pin, but the doc expects device
+    results, _ = run([case], perfect([case]))
+    (r,) = results
+    assert r.end_to_end["area"] is False and r.model_only["area"] is True
+
+
+def test_a_perfect_reply_passes_the_near_me_rows():
+    results, _ = run([BY_ROW[61], BY_ROW[63]], perfect([BY_ROW[61], BY_ROW[63]]))
+    assert all(all(r.end_to_end.values()) and all(r.model_only.values()) for r in results)
 
 
 def test_the_round_2_rows_score_vibe_and_who():
@@ -336,7 +357,7 @@ def retrying(cases, script, max_calls=80):
     retry = run_evals.RateLimitRetry(FakeLLM(**script), sleep=sleep)
     llm = run_evals.CountingLLM(retry, max_calls)
     clock = run_evals.Clock()
-    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 3}))
+    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 4}))
     understander = Understander(store, llm, RecordingTracer(), clock=clock)
     results = asyncio.run(run_evals.run_cases(cases, understander, llm, clock, CITY, 2))
     return results, llm, retry, waits
@@ -556,7 +577,7 @@ def test_a_real_run_paces_groq_and_reports_tokens(monkeypatch, tmp_path):
     summary = json.loads(out.read_text())["summary"]
     assert (summary["tokens"], summary["paced_wait_s"]) == ({}, 0.0)
     assert (summary["rate_limit_retries"], summary["stopped"]) == (0, None)
-    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 3}
+    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 4}
 
 
 def test_supabase_config_needs_its_keys(monkeypatch, tmp_path):
@@ -605,7 +626,7 @@ def test_scores_go_to_langfuse_with_versions_and_failed_fields():
     e2e = bodies[("r68", "parse_end_to_end")]
     assert (e2e["value"], e2e["comment"]) == (0, "failed: date")
     assert e2e["traceId"] == results[1].trace_id
-    assert e2e["metadata"]["understand_prompt_version"] == 3
+    assert e2e["metadata"]["understand_prompt_version"] == 4
     assert e2e["metadata"]["llm_understand_version"] == 2
     assert bodies[("r64", "parse_model_only")]["value"] == 1
 

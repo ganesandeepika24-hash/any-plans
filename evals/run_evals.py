@@ -170,7 +170,12 @@ def _area_matches(expected: dict | None, result: UnderstandResult, case: dict, c
         return False  # the product should know this place; the parser doesn't yet
     if "point" in expected:
         loc = case["location"]
-        return result.used_location and (f.lat, f.lon) == (loc["lat"], loc["lon"])
+        # The point must also be marked as its source: device for "near me" (0017).
+        return (
+            result.used_location
+            and (f.lat, f.lon) == (loc["lat"], loc["lon"])
+            and result.location_source == expected.get("source")
+        )
     area = next(a for a in city.areas if a.id == expected["id"])
     return not result.used_location and (f.lat, f.lon) == (area.lat, area.lon)
 
@@ -579,11 +584,11 @@ async def main_async(args) -> int:
     cases = load_cases(args.cases)
     async with httpx.AsyncClient() as http:
         if args.config == "repo":
-            # What ships: llm_understand v2 from 014, understand_prompt v3 from 015, the
+            # What ships: llm_understand v2 from 014, understand_prompt v4 from 017, the
             # seeded areas.
             from tests.understand_support import FakeStore, entries
 
-            store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 3}))
+            store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 4}))
         else:
             if not (_env("SUPABASE_URL") and _env("SUPABASE_SERVICE_KEY")):
                 print(
