@@ -136,7 +136,7 @@ jobs:
       - name: Load seeds twice
         run: |
           for pass in 1 2; do
-            for seed in cities areas; do
+            for seed in cities areas calendar; do
               $PSQL -X -v ON_ERROR_STOP=1 -1 -f - < "db/seed/$seed.sql"
             done
           done
@@ -209,7 +209,7 @@ jobs:
           docker exec "$PG" createdb -U postgres -T template1 anyplans
           docker exec -i "$PG" psql -U postgres -d anyplans -X -v ON_ERROR_STOP=1 -f - < db/ci/bootstrap.sql
           PSQL="docker exec -i $PG psql -U postgres -d anyplans" db/ci/migrate.sh
-          for seed in cities areas; do
+          for seed in cities areas calendar; do
             docker exec -i "$PG" psql -U postgres -d anyplans -X -v ON_ERROR_STOP=1 -1 -f - < "db/seed/$seed.sql"
           done
 

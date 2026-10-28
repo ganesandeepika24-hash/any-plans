@@ -271,3 +271,12 @@ def test_the_active_prompt_reads_the_near_me_phrases_and_a_bare_something():
     prompt = migration_config()["understand_prompt"]["system"]
     for phrase in ('"near me"', '"nearby me"', '"around me"', '"something near me tonight"'):
         assert phrase in prompt, phrase
+
+
+def test_both_prompts_name_observances_and_half_terms_as_events():
+    # Code looks the name up in the calendar (decision 0019); the two prompts share it.
+    config = migration_config()
+    for key in ("understand_prompt", "refine_prompt"):
+        prompt = config[key]["system"]
+        for phrase in ('"Mother\'s Day"', '"February half-term"', '"Carnival, Sunday"'):
+            assert phrase in prompt, (key, phrase)

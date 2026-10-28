@@ -5,10 +5,11 @@ Evenings start at 17:00. A weekend runs from Friday 17:00 to Monday 05:00. Every
 starts no earlier than now. A place or date that can't be resolved drops that filter
 and adds a note, so the UI can say what it ignored.
 
-When the search can't run without asking (a vague or conflicting date, no location
-for "near me", "cheap", a total price, an event with no date, no idea what kind of
-thing), the filter is left out and the reason goes in `missing`. The rest still
-resolves, so the answer only fills the gap.
+A named event with no date ("Hanukkah", "February half-term") takes its days from the
+city's calendar (decision 0019). When the search can't run without asking (a vague or
+conflicting date, no location for "near me", "cheap", a total price, an event the
+calendar doesn't have, no idea what kind of thing), the filter is left out and the
+reason goes in `missing`. The rest still resolves, so the answer only fills the gap.
 """
 
 import re
@@ -36,6 +37,7 @@ NoteCode = Literal[
     "already_free",  # refine: "cheaper" than free (decision 0018)
     "no_price_limit",  # refine: "can spend more" with no price limit to raise
     "radius_floor",  # refine: "closer" than the smallest radius
+    "estimated_date",  # the calendar's date for the event is an estimate (decision 0019)
 ]
 # The complete list, in the order the app asks.
 Missing = Literal["location", "date", "budget", "price_basis", "event_date", "category"]
@@ -77,11 +79,24 @@ class Area:
 
 
 @dataclass(frozen=True)
+class CalendarDate:
+    """One occurrence of a named event, in whole local days (calendar_dates, 019)."""
+
+    id: str
+    name: str
+    aliases: tuple[str, ...]
+    first: date
+    last: date
+    estimate: bool = False
+
+
+@dataclass(frozen=True)
 class City:
     id: str
     name: str
     tz: ZoneInfo
     areas: tuple[Area, ...]
+    calendar: tuple[CalendarDate, ...] = ()
 
     def find_area(self, place: str) -> Area | None:
         wanted = normalise(place)
@@ -91,6 +106,17 @@ class City:
             if wanted in {normalise(n) for n in (area.name, *area.aliases)}:
                 return area
         return None
+
+    def find_date(self, event: str, today: date) -> CalendarDate | None:
+        """The next occurrence of `event` that hasn't ended by `today`, so "Eid" is
+        whichever Eid comes first and "half-term" the next one."""
+        wanted = normalise(event)
+        found = [
+            d
+            for d in self.calendar
+            if d.last >= today and wanted in {normalise(n) for n in (d.name, *d.aliases)}
+        ]
+        return min(found, key=lambda d: d.first, default=None)
 
 
 @dataclass(frozen=True)
@@ -123,20 +149,33 @@ def resolve(
     missing: set[Missing] = set()
     fields: dict = {}
 
+    when = understood.when
     if "date" in understood.unclear:
         missing.add("date")
-    elif understood.when is not None:
+    elif understood.event is not None and (when is None or when.kind == "weekday"):
+        # "Hanukkah", or "Carnival, Sunday": the event's days, or that weekday in them.
+        found = city.find_date(understood.event, local_day(now, city.tz))
+        if found is None:
+            missing.add("event_date")  # ask rather than guess (festival-dates rule)
+        else:
+            try:
+                fields["date_from"], fields["date_to"] = event_window(found, when, now, city.tz)
+            except AmbiguousDate:
+                missing.add("date")
+            if found.estimate:
+                notes.append(
+                    Note("estimated_date", f"{found.name}'s date is an estimate, so check it.")
+                )
+    elif when is not None:
         try:
-            window = date_window(understood.when, now, city.tz)
+            window = date_window(when, now, city.tz)
         except AmbiguousDate:
             missing.add("date")
         else:
             if window is None:
-                notes.append(Note("no_such_date", _no_such_date(understood.when)))
+                notes.append(Note("no_such_date", _no_such_date(when)))
             else:
                 fields["date_from"], fields["date_to"] = window
-    elif understood.event is not None:
-        missing.add("event_date")
 
     if understood.categories:
         fields["categories"] = understood.categories
@@ -164,8 +203,7 @@ def date_window(when: When, now: datetime, tz: ZoneInfo) -> tuple[datetime, date
     """The window `when` means, or None if it has passed or doesn't exist. Raises
     AmbiguousDate when it could mean more than one day."""
     local_now = now.astimezone(tz)
-    # The "day" before 05:00 is still yesterday's.
-    day = local_now.date() - timedelta(days=1 if local_now.time() < DAY_START else 0)
+    day = local_day(now, tz)
 
     def at(d: date, t: time = DAY_START) -> datetime:
         return datetime.combine(d, t, tzinfo=tz)
@@ -212,6 +250,33 @@ def date_window(when: When, now: datetime, tz: ZoneInfo) -> tuple[datetime, date
             end = at(last + timedelta(days=1))
     start = max(start, local_now)
     return (start, end) if start < end else None
+
+
+def local_day(now: datetime, tz: ZoneInfo) -> date:
+    """Today in `tz`; before 05:00 it's still yesterday."""
+    local_now = now.astimezone(tz)
+    return local_now.date() - timedelta(days=1 if local_now.time() < DAY_START else 0)
+
+
+def event_window(
+    found: CalendarDate, when: When | None, now: datetime, tz: ZoneInfo
+) -> tuple[datetime, datetime]:
+    """The event's days from now on, or the one day in them that `when` names
+    ("Hanukkah, Saturday"). Raises AmbiguousDate when that weekday isn't one of the
+    days left, or is more than one of them."""
+    local_now, today = now.astimezone(tz), local_day(now, tz)
+    first, last = max(found.first, today), found.last
+    if when is not None:
+        days = [
+            first + timedelta(days=n)
+            for n in range((last - first).days + 1)
+            if WEEKDAYS[(first + timedelta(days=n)).weekday()] == when.weekday
+        ]
+        if len(days) != 1:
+            raise AmbiguousDate
+        first = last = days[0]
+    start = datetime.combine(first, DAY_START, tzinfo=tz)
+    return max(start, local_now), datetime.combine(last + timedelta(days=1), DAY_START, tzinfo=tz)
 
 
 def _weekday_candidates(when: When, today: date) -> list[date]:

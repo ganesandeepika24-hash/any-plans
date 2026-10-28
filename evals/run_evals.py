@@ -602,11 +602,12 @@ async def main_async(args) -> int:
     cases = load_cases(args.cases)
     async with httpx.AsyncClient() as http:
         if args.config == "repo":
-            # What ships: llm_understand v2 from 014, understand_prompt v4 from 017, the
-            # seeded areas.
+            # What ships: llm_understand v2 from 014, understand_prompt v5 and refine_prompt
+            # v2 from 019, the seeded areas and calendar.
             from tests.understand_support import FakeStore, entries
 
-            store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 4}))
+            versions = {"llm_understand": 2, "understand_prompt": 5, "refine_prompt": 2}
+            store = FakeStore(entries(versions=versions))
         else:
             if not (_env("SUPABASE_URL") and _env("SUPABASE_SERVICE_KEY")):
                 print(

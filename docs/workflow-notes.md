@@ -2,6 +2,14 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: stage 1 step 3, calendar (decision 0019)
+
+- **Who refreshes the calendar.** The seed runs out after May half-term 2027. Before 1 September 2027, deepika (owner) asks Claude Code to add the 2027 to 2028 rows to `db/seed/calendar.sql`. Each row needs a named source and a check date (half-terms from a named borough's published term dates). deepika then checks the sources and runs the seed against Supabase. Until then, an event with no row asks for a date, which is safe.
+- **A grant the migration rule didn't spell out.** The first 019 revoked only `anon` and `authenticated`, then granted `select` to `service_role`. Supabase's default privileges had already given `service_role` everything, so it could also write the calendar. The new db check caught it, and 019 now revokes from `service_role` too.
+- **A typo in a seed date.** One row's `checked_on` said 2027 instead of 2026. Caught when reading the seed back. The db check now fails on any check date in the future.
+- **A gap the tests missed.** A deliberate break that searched weekdays from an event's first day, not today, passed every test. "Half-term, Tuesday" on the Wednesday of half-term would have picked a day already gone. It has a test now.
+- **A local-only failure, checked against `main`.** Four jobs tests (`only_service_role_may_call_it`) fail on a local database because `service_role` has no usage on `extensions` there. They fail the same way on a fresh `main`, so they aren't from this change. CI passes them.
+
 ## 2026-10-28: stage 1 step 2, refine (decision 0018)
 
 - **The security filter had no test.** A deliberate break that dropped the `user_id` filter from the real query log's own-row read passed every test, because only the fake log was exercised. That filter is the only thing stopping one user from refining another's query (the service key bypasses RLS). It now has a request-level test.

@@ -50,7 +50,7 @@ begin
     end if;
 
     foreach t in array array['config', 'usage_daily', 'curated_pages', 'job_runs', 'schema_migrations',
-                             'price_snapshots'] loop
+                             'price_snapshots', 'calendar_dates'] loop
       begin
         execute format('select count(*) from public.%I', t);
         raise exception '% can read %', r, t;
@@ -490,13 +490,13 @@ begin
     raise exception 'understand_context must be executable by service_role only';
   end if;
 
-  -- 014 makes llm_understand v2 active and 017 understand_prompt v4; earlier versions are
+  -- 014 makes llm_understand v2 active and 019 understand_prompt v5; earlier versions are
   -- kept for switching back.
   if (select count(*) from public.config where key = 'llm_understand' and version = 2 and is_active) <> 1
      or (select count(*) from public.config where key = 'llm_understand' and version = 1 and not is_active) <> 1
-     or (select count(*) from public.config where key = 'understand_prompt' and version = 4 and is_active) <> 1
-     or (select count(*) from public.config where key = 'understand_prompt' and version < 4 and not is_active) <> 3 then
-    raise exception 'expected llm_understand v2 and understand_prompt v4 active, with earlier versions kept';
+     or (select count(*) from public.config where key = 'understand_prompt' and version = 5 and is_active) <> 1
+     or (select count(*) from public.config where key = 'understand_prompt' and version < 5 and not is_active) <> 4 then
+    raise exception 'expected llm_understand v2 and understand_prompt v5 active, with earlier versions kept';
   end if;
 
   if (select value_json->'providers'->0->>'provider' from public.config
@@ -724,8 +724,73 @@ begin
   end if;
   if (select value_json from public.config where key = 'refine_steps' and is_active)
      is distinct from '{"cheaper": 0.5, "closer": 0.3333333333, "min_radius_km": 0.5}'::jsonb
-     or not exists (select 1 from public.config where key = 'refine_prompt' and version = 1 and is_active) then
-    raise exception 'refine_steps or refine_prompt v1 is missing, inactive or changed';
+     or not exists (select 1 from public.config where key = 'refine_prompt' and version = 1) then
+    raise exception 'refine_steps or refine_prompt v1 is missing or changed';
+  end if;
+end $$;
+
+-- Migration 019 and the calendar seed: calendar_dates, and understand_context's calendar.
+do $$
+declare
+  ctx jsonb;
+  ids text[];
+begin
+  if not (select relrowsecurity from pg_class where oid = 'public.calendar_dates'::regclass) then
+    raise exception 'calendar_dates has no row level security';
+  end if;
+  if not has_table_privilege('service_role', 'public.calendar_dates', 'select')
+     or has_table_privilege('service_role', 'public.calendar_dates', 'insert')
+     or has_table_privilege('anon', 'public.calendar_dates', 'select')
+     or has_table_privilege('authenticated', 'public.calendar_dates', 'select') then
+    raise exception 'calendar_dates should be readable by service_role only';
+  end if;
+  if (select count(*) from public.calendar_dates where city_id = 'london') <> 12
+     or exists (select 1 from public.calendar_dates where source = '' or checked_on > current_date) then
+    raise exception 'the calendar seed should load 12 London rows, each with a source and a past check date';
+  end if;
+  if (select count(*) from public.calendar_dates where estimate) <> 1 then
+    raise exception 'only Eid al-Fitr is an estimate in the seed';
+  end if;
+
+  begin
+    insert into public.calendar_dates (id, city_id, name, kind, starts_on, ends_on, source, checked_on)
+      values ('test-backwards', 'london', 'Backwards', 'event', current_date, current_date - 1, 'ci', current_date);
+    raise exception 'calendar_dates accepted an end before its start';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into public.calendar_dates (id, city_id, name, kind, starts_on, ends_on, source, checked_on)
+      values ('test-kind', 'london', 'Kind', 'party', current_date, current_date, 'ci', current_date);
+    raise exception 'calendar_dates accepted an unknown kind';
+  exception when check_violation then null;
+  end;
+
+  -- understand_context leaves out what ended before yesterday (the agent's day runs to
+  -- 05:00), keeps the rest, and returns each entry's fields.
+  delete from public.calendar_dates;
+  insert into public.calendar_dates (id, city_id, name, aliases, kind, starts_on, ends_on, estimate, source, checked_on) values
+    ('test-over',      'london', 'Over',      '{}',       'event', current_date - 5, current_date - 2, false, 'ci', current_date),
+    ('test-yesterday', 'london', 'Yesterday', '{}',       'event', current_date - 1, current_date - 1, false, 'ci', current_date),
+    ('test-coming',    'london', 'Coming',    '{Soon}',   'festival', current_date + 3, current_date + 4, true, 'ci', current_date);
+  ctx := public.understand_context('london');  -- who may call it is 011's check
+  select array_agg(e->>'id' order by e->>'id') into ids from jsonb_array_elements(ctx->'calendar') e;
+  if ids is distinct from array['test-coming', 'test-yesterday'] then
+    raise exception 'understand_context returned calendar %', ids;
+  end if;
+  if (select e from jsonb_array_elements(ctx->'calendar') e where e->>'id' = 'test-coming')
+     is distinct from jsonb_build_object('id', 'test-coming', 'name', 'Coming', 'aliases', '["Soon"]'::jsonb,
+                                         'starts_on', current_date + 3, 'ends_on', current_date + 4, 'estimate', true) then
+    raise exception 'understand_context calendar entry has the wrong shape';
+  end if;
+  if jsonb_array_length(ctx->'areas') = 0 then
+    raise exception 'understand_context lost its areas';
+  end if;
+
+  -- 019 makes refine_prompt v2 active and keeps v1.
+  if (select array_agg(version order by version) from public.config where key = 'refine_prompt')
+       is distinct from array[1, 2]
+     or not exists (select 1 from public.config where key = 'refine_prompt' and version = 2 and is_active) then
+    raise exception 'expected refine_prompt v2 active, with v1 kept';
   end if;
 end $$;
 
