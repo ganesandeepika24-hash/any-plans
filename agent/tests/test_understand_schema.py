@@ -21,12 +21,22 @@ from app.understand.schema import (
 )
 from tests.understand_support import REPO, migration_config, reply, when
 
-MIGRATION_010 = (REPO / "db" / "migrations" / "010_search_items.sql").read_text()
+# The latest migration that creates search_items: 010, replaced by 022 (decision 0022).
+SEARCH_ITEMS = [
+    p.read_text()
+    for p in sorted((REPO / "db" / "migrations").glob("*.sql"))
+    if "create function public.search_items(" in p.read_text()
+][-1]
 
 
 def _sql_array(name: str) -> list[str]:
-    body = re.search(rf"{name} constant text\[\] := array\[(.*?)\];", MIGRATION_010, re.S)
+    body = re.search(rf"{name} constant text\[\] := array\[(.*?)\];", SEARCH_ITEMS, re.S)
     return re.findall(r"'([^']+)'", body.group(1))
+
+
+def search_items_columns() -> list[str]:
+    body = re.search(r"returns table \((.*?)\)\nlanguage", SEARCH_ITEMS, re.S)
+    return re.findall(r"^\s*(\w+) ", body.group(1), re.M)
 
 
 # The contract with search_items ------------------------------------------------
@@ -35,6 +45,15 @@ def _sql_array(name: str) -> list[str]:
 def test_search_filters_has_exactly_search_items_keys_and_the_agents_own():
     assert set(SearchFilters.model_fields) - set(AGENT_ONLY_FILTERS) == set(_sql_array("allowed"))
     assert not set(AGENT_ONLY_FILTERS) & set(_sql_array("allowed"))
+
+
+def test_result_cards_take_their_fields_from_search_items_columns():
+    from app.search import ResultOut
+
+    columns = search_items_columns()
+    assert {"confidence", "confidence_label", "lat", "lon"} <= set(columns)
+    # rank is the agent's own; venue_id and similarity stay in the database.
+    assert set(ResultOut.model_fields) - {"rank"} == set(columns) - {"venue_id", "similarity"}
 
 
 def test_categories_match_search_items():

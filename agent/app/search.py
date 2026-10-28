@@ -23,7 +23,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 import httpx
@@ -114,6 +114,9 @@ def _vector(values: list[float]) -> str:
     return "[" + ",".join(repr(float(v)) for v in values) + "]"
 
 
+Confidence = Literal["checked_today", "check_site", "web"]
+
+
 class ResultOut(BaseModel):
     rank: int
     id: UUID
@@ -130,7 +133,14 @@ class ResultOut(BaseModel):
     url: str | None
     image_url: str | None
     last_checked_at: datetime | None  # freshness, shown on every card (principle 6)
+    # The card's confidence label, from source and last_checked_at in search_items
+    # (migration 022, decision 0022), never from the model. Required: without 022 every
+    # row fails here and the search answers SEARCH_UNAVAILABLE.
+    confidence: Confidence
+    confidence_label: str
     distance_m: float | None  # from the searched point; returned, never logged
+    lat: float | None  # the event's own point, for the map; null when it has none
+    lon: float | None
     score: float
 
 

@@ -2,7 +2,7 @@
 
 This file is the contract between the agent (`agent/`) and the Lovable app (step 1.4). The app works from this file, not from guesses. If the code and this file disagree, the code is right and this file has a bug: raise it, don't work around it.
 
-Written 28 Oct 2026 against `main` at `9edf9fd` (after PR #26). Every example response below was produced by running the real routes with the agent tests' fakes for the model, the database and the embedder (the harnesses in `agent/tests/test_parse_route.py`, `test_search_route.py` and `test_refine_route.py`). The event rows in the examples are invented. Ids and trace ids differ on every call.
+Written 28 Oct 2026 against `main` at `9edf9fd` (after PR #26). Updated for CORS (PR #28) and for migration 022's confidence label and event points (decision 0022). Every example response below was produced by running the real routes with the agent tests' fakes for the model, the database and the embedder (the harnesses in `agent/tests/test_parse_route.py`, `test_search_route.py` and `test_refine_route.py`). The event rows in the examples are invented. Ids and trace ids differ on every call.
 
 Sections marked **Not built yet** describe something the step 1.4 plan asks for that `main` doesn't do. Don't build against them as if they exist.
 
@@ -362,7 +362,11 @@ Content-Type: application/json
       "url": "https://www.ticketmaster.co.uk/event/EXAMPLE1",
       "image_url": "https://s1.ticketm.net/dam/EXAMPLE1.jpg",
       "last_checked_at": "2026-10-28T06:00:00Z",
+      "confidence": "checked_today",
+      "confidence_label": "Price checked today",
       "distance_m": 412.6,
+      "lat": 51.513435,
+      "lon": -0.131566,
       "score": 0.86
     },
     {
@@ -381,7 +385,11 @@ Content-Type: application/json
       "url": "https://www.skiddle.com/whats-on/EXAMPLE2",
       "image_url": null,
       "last_checked_at": "2026-10-28T03:10:00Z",
+      "confidence": "check_site",
+      "confidence_label": "Check availability on Skiddle",
       "distance_m": 655.0,
+      "lat": 51.513765,
+      "lon": -0.129752,
       "score": 0.79
     }
   ]
@@ -491,7 +499,11 @@ The earlier search was live music this weekend under £40; "cheaper" lowers the 
       "url": "https://www.ticketmaster.co.uk/event/EXAMPLE3",
       "image_url": null,
       "last_checked_at": "2026-10-28T06:00:00Z",
+      "confidence": "checked_today",
+      "confidence_label": "Price checked today",
       "distance_m": null,
+      "lat": 51.538988,
+      "lon": -0.142734,
       "score": 0.64
     }
   ]
@@ -596,24 +608,29 @@ Each entry in `results` (`ResultOut`, `agent/app/search.py`):
 | `url` | string or null | The booking link, on the source's own site. Open it in a new tab. |
 | `image_url` | string or null | The source's own image URL. Show it from that URL only, never re-host or copy it (decision 0001). Null means no image. |
 | `last_checked_at` | ISO 8601 or null | When the source last confirmed the event. Show freshness on every card (principle 6). |
+| `confidence` | `"checked_today"`, `"check_site"` or `"web"` | A stable code for the confidence label. Use it only for an extra colour or icon cue. |
+| `confidence_label` | string | The confidence label. Show it on every card, exactly as sent. See below. |
 | `distance_m` | number or null | **Metres** from the search centre (the area, the default centre, or the user's point). Null when the search had no point or the event has no location. Show in miles: `distance_m / 1609.344`. |
+| `lat`, `lon` | numbers or null | The event's own point, for its map pin. The same point `distance_m` is measured from. Both null when the source gave no location: list the card, but put no pin on the map. |
 | `score` | number | Ranking score. Internal: don't show it. |
 
-### The confidence label (not built yet)
+### The confidence label
 
-PRD R-02 puts a confidence label on every card. **`main` has no label field yet.** The rule was decided on 28 Oct 2026 (`claude/confidence-label-decision-1.4.md`):
+PRD R-02 puts a confidence label on every card. The rule (`claude/confidence-label-decision-1.4.md` and decision 0022):
 
-| Result | Label |
-|---|---|
-| Official API (`ticketmaster`, `skiddle`) with `last_checked_at` within the last 24 hours | "Price checked today" |
-| Official API with `last_checked_at` older than 24 hours, or null | "Check availability on [site]" |
-| Restaurants, and any result without an official source | "Check availability on [site]" |
-| Web search (Tavily, not built) | "Found on the web today" |
+| Result | `confidence` | `confidence_label` |
+|---|---|---|
+| Official API (`ticketmaster`, `skiddle`), checked within the last 24 hours, with a price | `checked_today` | "Price checked today" |
+| Official API, checked more than 24 hours ago or never | `check_site` | "Check availability on Ticketmaster" (or Skiddle) |
+| Official API with no price listed, however fresh | `check_site` | "Check availability on Ticketmaster" (or Skiddle) |
+| Restaurants, and any source without an official API | `check_site` | "Check availability on {site}", or "Check availability on the booking site" for a source with no site name |
+| Web search (Tavily, not built yet) | `web` | "Found on the web today" |
 
-- **Where it's computed:** in the agent or the database, from `source` and `last_checked_at` only, never by the model (decision 0001). Signed-in and signed-out search show the same label for the same event.
-- **Why 24 hours:** the nightly ingest checks each event once a day, so a check from last night still counts as today. An older check gets "Check availability on [site]" rather than a stale "today" claim.
-- **What the app does:** shows the label text on the card exactly as sent, and never works it out itself. Colour is only an extra cue, never the only one.
-- **[site]:** the site that the card's `url` opens, e.g. "Check availability on Ticketmaster". The exact field shape and site names come with the build (see [Not built yet](#13-not-built-yet)).
+- **Where it's computed:** in the database function `search_items`, from `source`, `last_checked_at` and whether there's a price. Never by the model. Signed-in and signed-out search show the same label for the same event, once signed-out search uses the same function (fix 4).
+- **Why 24 hours:** the ingest checks each event once a day, so last night's check still counts as today. An older check gets "Check availability on …" rather than a stale "today" claim. The window and the site names are config (`confidence_labels`), so they can change without a release.
+- **No price:** "Price checked today" above "Price not listed" would claim something the data can't back, so an unpriced event always gets "Check availability on …". A free event (price 0) has a price.
+- **What the app does:** shows `confidence_label` on the card exactly as sent, and never works it out itself or rewrites it. Colour or an icon may follow `confidence`, but only as an extra cue: the text is always shown.
+- **The label is as of the search.** A card kept open for hours isn't updated; a new search is.
 
 ## 11. Errors
 
@@ -707,9 +724,8 @@ What the step 1.4 plan asks for that `main` doesn't do. Each needs an agent chan
 
 | Gap | On `main` | Needed |
 |---|---|---|
-| **Confidence label** | No label field on results. | The rule is decided ([section 10](#the-confidence-label-not-built-yet)). Still to build: a label on each result, computed in the agent or database, and the same label on the signed-out path. Because filter-only search reads Supabase directly, the database is the one place both paths share. |
 | **Distance in km** | `distance_m` is in metres. | Nothing, if the app converts metres to miles. A `distance_km` field is a small change if the plan wants it. |
-| **Venue** | Only `venue_name`. No address or venue location on the card. | Add if the card or map needs it. The map needs each event's point, which isn't in `results` either. |
+| **Venue address** | Only `venue_name`. No address on the card. Each event's point is there (`lat`, `lon`). | Add if the card needs it. |
 | **The 429 cap reply** | The cap is a 200 `ai_resting` with `reason: "daily_cap"` (decision 0013). No endpoint returns 429. | Nothing, unless the plan changes 0013. |
 | **Image licence flag** | `image_url` is whatever the source's API supplies. No per-image licence field. Both current sources allow display from their own URLs (decision 0001). | A flag only if a source with other terms is added. |
 | **Filter-only search** | No agent endpoint. `search_items` is `service_role` only (decision 0010). The browser can read `events` and `venues` with the publishable key (with venue names through the `venue_id` link), but gets no ranking and no `distance_m`, and has to filter by date, price and distance itself. | A decision on how signed-out search gets the same card fields: a public function, a view, or the browser computing them. |

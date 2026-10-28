@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.4 fix 2, the confidence label and event points (decision 0022)
+
+- **A plan gap the owner settled.** The label rule didn't cover an event with no price, so "Price checked today" would have sat above "Price not listed". I raised it once, in the plan. The owner chose "Check availability on [site]".
+- **Two new database tests failed for the test's reasons, not the code's.** The new insert fixture didn't use the `db` fixture, so rows from earlier tests leaked in. And comparing scores exactly failed because the date term moves with `now()`. Fixed: the fixture cleans the tables, and the test compares order, then scores approximately.
+- **The schema test was still reading 010.** `test_understand_schema.py` checked the filters against 010's text, but 022 now defines the live function. It reads the latest migration that creates `search_items`. A new test checks `ResultOut` against that migration's columns, so the two can't drift.
+- **The scratchpad was gone in a new session.** The example generator for `docs/api.md` had to be written again. The regenerated `/search` and `/refine` examples were compared field by field with the doc.
+
 ## 2026-10-28: step 1.4 fix 1, CORS
 
 - **The first merge was blocked.** I ran `gh pr merge` on #27 when the owner asked, and Claude Code's auto-mode permission check refused it as a merge without review. The owner merged it on GitHub. Branches start from `main` after that merge, not before.
