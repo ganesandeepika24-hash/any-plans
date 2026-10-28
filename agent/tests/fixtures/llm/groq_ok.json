@@ -9,7 +9,7 @@
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "{\"keywords\": \"jazz\", \"categories\": [\"Music\"], \"when\": {\"kind\": \"tonight\", \"weekday\": null, \"qualifier\": null, \"month\": null, \"day\": null, \"holiday\": null}, \"place\": \"Soho\", \"distance\": null, \"price_min\": null, \"price_max\": 20, \"price_scope\": null, \"free\": false, \"near_me\": false, \"event\": null, \"unclear\": []}",
+        "content": "{\"keywords\": \"jazz\", \"categories\": [\"Music\"], \"when\": {\"kind\": \"tonight\", \"weekday\": null, \"qualifier\": null, \"month\": null, \"day\": null, \"holiday\": null}, \"place\": \"Soho\", \"distance\": null, \"price_min\": null, \"price_max\": 20, \"price_scope\": null, \"free\": false, \"near_me\": false, \"event\": null, \"vibe\": null, \"who\": null, \"unclear\": []}",
         "reasoning": "The user wants jazz in Soho tonight under \u00a320."
       },
       "finish_reason": "stop"

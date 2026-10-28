@@ -169,6 +169,24 @@ def test_a_named_category_never_asks():
     assert r.missing == () and r.filters.categories == ["Music"]
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"vibe": "Chilled"},  # "something chilled tonight"
+        {"who": "Family with kids"},  # "things to do with the kids"
+        {"vibe": "Lively", "who": "Friends"},  # "hen do, lively"
+    ],
+)
+def test_a_vibe_or_a_group_is_enough_to_search_without_asking(fields):
+    r = run(unclear=["category"], when=when("tonight"), **fields)
+    assert r.missing == () and r.filters.categories is None
+
+
+def test_a_vibe_doesnt_stop_other_questions():
+    r = run(vibe="Chilled", unclear=["category", "date"], near_me=True)
+    assert r.missing == ("location", "date")
+
+
 def test_no_category_and_nothing_unclear_runs_with_no_category():
     r = run(when=when("this_weekend"))  # "just surprise me this weekend"
     assert r.missing == () and r.filters.categories is None
@@ -247,21 +265,23 @@ def test_each_question_names_the_request_and_offers_its_choices():
     assert when_q.choices == ()
 
 
-def test_the_category_question_offers_the_eight_chips():
+def test_the_category_question_offers_categories_vibes_and_surprise_me():
+    # "Something fun": no clear mapping, so both sets (round 2, decision 1).
     u = understood(keywords="fun", unclear=["category"])
     (q,) = questions(("category",), u, CITY.name)
     assert q.question == "Fun: what are you in the mood for?"
-    assert q.choices == (
-        "Music",
-        "Comedy",
-        "Food & Drink",
-        "Arts",
-        "Nightlife",
-        "Family",
-        "Sport",
-        "Just surprise me",
-    )
-    assert CATEGORY_CHOICES == q.choices
+    assert [(g.field, g.choices) for g in q.groups] == [
+        ("category", ("Music", "Comedy", "Food & Drink", "Arts", "Nightlife", "Family", "Sport")),
+        ("vibe", ("Chilled", "Lively", "Cultural", "Foodie", "Outdoors")),
+        (None, ("Just surprise me",)),
+    ]
+    assert q.choices == CATEGORY_CHOICES == tuple(c for g in q.groups for c in g.choices)
+
+
+def test_other_questions_have_no_groups():
+    u = understood(keywords="Christmas markets", near_me=True, price_max=60, price_scope="total")
+    for q in questions(("location", "date", "price_basis"), u, CITY.name):
+        assert q.groups == ()
 
 
 def test_price_basis_and_event_date_questions():

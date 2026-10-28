@@ -3,12 +3,20 @@
 import json
 import re
 from datetime import UTC, datetime, timedelta, timezone
+from typing import get_args
 
 import pytest
 from pydantic import ValidationError
 
-from app.understand.schema import SearchFilters, UnderstoodQuery, strict_json_schema
-from tests.understand_support import REPO, reply, when
+from app.understand.schema import (
+    Category,
+    SearchFilters,
+    UnderstoodQuery,
+    Vibe,
+    Who,
+    strict_json_schema,
+)
+from tests.understand_support import REPO, migration_config, reply, when
 
 MIGRATION_010 = (REPO / "db" / "migrations" / "010_search_items.sql").read_text()
 
@@ -165,6 +173,11 @@ def _invalid(**changes) -> str:
         _invalid(near_me=...),
         _invalid(price_scope="per person"),
         _invalid(event="x" * 101),
+        _invalid(vibe="Romantic"),
+        _invalid(vibe=["Chilled"]),
+        _invalid(vibe=...),
+        _invalid(who="Couple"),
+        _invalid(who=...),
         "[]",
         '"jazz tonight"',
     ],
@@ -199,6 +212,11 @@ def _invalid(**changes) -> str:
         "missing near_me",
         "unknown price scope",
         "event too long",
+        "unknown vibe",
+        "vibe as a list",
+        "missing vibe",
+        "unknown who",
+        "missing who",
         "array",
         "string",
     ],
@@ -206,6 +224,20 @@ def _invalid(**changes) -> str:
 def test_anything_else_is_refused(text):
     with pytest.raises(ValidationError):
         UnderstoodQuery.model_validate_json(text)
+
+
+def test_vibe_and_who_take_the_prd_chips():
+    q = UnderstoodQuery.model_validate_json(reply(vibe="Outdoors", who="Family with kids"))
+    assert (q.vibe, q.who) == ("Outdoors", "Family with kids")
+    schema = strict_json_schema(UnderstoodQuery)["properties"]
+    assert schema["vibe"]["anyOf"][0]["enum"] == [
+        "Chilled",
+        "Lively",
+        "Cultural",
+        "Foodie",
+        "Outdoors",
+    ]
+    assert schema["who"]["anyOf"][0]["enum"] == ["Solo", "Date", "Friends", "Family with kids"]
 
 
 def test_the_schema_suits_groq_strict_mode():
@@ -226,3 +258,10 @@ def test_the_schema_suits_groq_strict_mode():
 
     walk(schema)
     assert set(schema["properties"]) == set(UnderstoodQuery.model_fields)
+
+
+def test_the_active_prompt_names_every_category_vibe_and_who():
+    prompt = migration_config()["understand_prompt"]["system"]
+    for value in (*get_args(Category), *get_args(Vibe), *get_args(Who)):
+        assert value in prompt, value
+    assert "- vibe:" in prompt and "- who:" in prompt

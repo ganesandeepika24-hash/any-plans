@@ -2,6 +2,13 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-28: step 1.6, round 2, vibe and who
+
+- **Two of the owner's notes disagreed.** Round 2 said a bare "Saturday" asks (row 39), while rule 3 as built and eight eval rows read it as the coming Saturday. Caught by checking the resolver before changing row 39, and settled by the owner (the coming one) before any row changed.
+- **A doc expectation the prompt rules out.** Rows 12 and 13 expect vibes inferred from the activity ("a jazz set" → Cultural), but the new prompt says not to guess a vibe from the activity. Both rows accept no vibe as well.
+- **A test that only knew one migration.** The parse route's column check read added `queries` columns from 013 only, so 015's columns showed up as extra keys. It now reads every migration's `alter table public.queries`.
+- **A first test that blamed the wrong thing.** The "no vibe is also right" test failed on row 12's known area gap (Bloomsbury), not on vibe. It now checks the vibe mark only.
+
 ## 2026-10-28: step 1.6, round 2, making the eval trustworthy
 
 - **The first run's accuracy wasn't what it looked like.** Groq rate-limited 28 of 51 cases, and each fallback spent a second call. The 80-call cap then stopped the run at row 53, so the near-me, ambiguity and chips rows never ran, and 4 rested cases counted as parse failures. The runner had no pacing because the plan assumed requests per minute (30) was the limit. The real limit is tokens per minute (8,000), at about 2,000 tokens a call.
