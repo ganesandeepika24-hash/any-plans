@@ -10,7 +10,7 @@ from app.embeddings import embed
 from app.graph import build_graph
 from app.parse import Parser
 from app.querylog import SupabaseQueryLog
-from app.routes import health, parse, search
+from app.routes import health, parse, refine, search
 from app.search import Searcher, SearchNode, SupabaseSearch
 from app.understand.llm import OpenAICompatibleClient
 from app.understand.node import Understander
@@ -72,6 +72,7 @@ def create_app() -> FastAPI:
     # Protected: require_user is a dependency of the route itself.
     app.include_router(parse.router)
     app.include_router(search.router)
+    app.include_router(refine.router)
     return app
 
 

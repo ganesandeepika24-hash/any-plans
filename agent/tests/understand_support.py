@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[2]
 MIGRATION_014 = REPO / "db" / "migrations" / "014_llm_understand_v2.sql"
 MIGRATION_016 = REPO / "db" / "migrations" / "016_search_and_usage.sql"
 MIGRATION_017 = REPO / "db" / "migrations" / "017_near_me_prompt.sql"
+MIGRATION_018 = REPO / "db" / "migrations" / "018_refine.sql"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _QUOTED = r"'((?:[^']|'')*)'"
@@ -61,14 +62,20 @@ def london() -> City:
 
 def migration_config() -> dict[str, Any]:
     """The active config the migrations ship: llm_understand v2 from 014,
-    understand_prompt v4 from 017 and provider_limits v1 from 016."""
+    understand_prompt v4 from 017, provider_limits v1 from 016, and refine_prompt and
+    refine_steps v1 from 018."""
     llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_014.read_text(), re.S).group(1)
     prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", MIGRATION_017.read_text(), re.S).group(1)
     limits = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_016.read_text(), re.S).group(1)
+    refine = MIGRATION_018.read_text()
+    refine_prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", refine, re.S).group(1)
+    steps = re.search(r"values \('refine_steps', 1, '(.*?)'", refine, re.S).group(1)
     return {
         "llm_understand": json.loads(llm),
         "understand_prompt": {"system": prompt},
         "provider_limits": json.loads(limits),
+        "refine_prompt": {"system": refine_prompt},
+        "refine_steps": json.loads(steps),
     }
 
 

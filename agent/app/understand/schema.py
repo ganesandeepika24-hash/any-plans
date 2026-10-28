@@ -113,6 +113,19 @@ class UnderstoodQuery(_Strict):
         return list(dict.fromkeys(value))
 
 
+PriceChange = Literal["cheaper", "pricier"]
+DistanceChange = Literal["closer", "further"]
+
+
+class RefineReply(UnderstoodQuery):
+    """A follow-up to an earlier search (decision 0018): what to change, in the same form
+    as a search. Fields left null (false for free and near_me) keep the earlier search's
+    values. The two changes are relative: code works out the new price or radius."""
+
+    price_change: PriceChange | None  # "make it cheaper", "can spend more"
+    distance_change: DistanceChange | None  # "somewhere closer", "further out is fine"
+
+
 class SearchFilters(BaseModel):
     """search_items' filters, key for key (migration 010; a test compares them)."""
 

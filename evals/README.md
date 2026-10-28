@@ -6,7 +6,8 @@
 
 - `id`, `row` (the docs' row number), `uc` (use case, or null), `tag` (`synthetic`), `source` (the doc it comes from).
 - `query`, `now` (frozen at Tue 27 Oct 2026 12:00 London), `location` (a pin or the user's position, or null). A location may carry `source`: `device` or `pin` (decision 0017).
-- `skip`: why the row doesn't run (`needs_prior_filters` for the refine rows 25 and 26), or null.
+- `skip`: why the row doesn't run, or null. No row is skipped now.
+- `prior`: for refine rows (25 and 26), the earlier search as its queries row stored it: `filters`, `embedding_text`, `vibe` and `who`. The row's `query` is the follow-up, and its `reply` is a `RefineReply` (decision 0018).
 - `scored`: the fields scored for this row: `date`, `area`, `budget`, `category`, `radius` only when the user states a distance, and `vibe` and `who` on the rows that test them (decision 0015).
 - `reply`: the `UnderstoodQuery` a good model should return. `also_accept`: changes to `reply` that are also right.
 - `expected`: what the product should do, written by hand from the docs, never by running the resolver:

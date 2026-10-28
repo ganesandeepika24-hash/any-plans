@@ -97,3 +97,53 @@ async def test_no_service_key_sends_nothing():
         with pytest.raises(QueryLogError):
             await log.count_today(USER, SINCE)
     assert seen == []
+
+
+QUERY = uuid.UUID("5d0c6a8e-0000-4000-8000-000000000002")
+
+
+async def test_get_own_reads_only_the_users_own_row():
+    # The service key bypasses RLS: this filter is what stops one user refining another's
+    # query (decision 0018).
+    seen = []
+    row = {"id": str(QUERY), "status": "ok", "filters": {}, "embedding_text": None}
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json=[row])
+
+    log, http = log_for(handler)
+    async with http:
+        assert await log.get_own(QUERY, USER) == row
+    (request,) = seen
+    assert request.url.path == "/rest/v1/queries"
+    assert dict(request.url.params) == {
+        "select": "id,status,filters,embedding_text,vibe,who",
+        "id": f"eq.{QUERY}",
+        "user_id": f"eq.{USER}",
+    }
+
+
+async def test_get_own_with_no_row_is_none_and_a_failure_is_an_error():
+    log, http = log_for(lambda request: httpx.Response(200, json=[]))
+    async with http:
+        assert await log.get_own(QUERY, USER) is None
+    log, http = log_for(lambda request: httpx.Response(503))
+    async with http:
+        with pytest.raises(QueryLogError):
+            await log.get_own(QUERY, USER)
+
+
+async def test_write_results_posts_the_rows():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(201)
+
+    rows = [{"query_id": str(QUERY), "rank": 1, "source": "skiddle", "source_id": "1", "score": 1}]
+    log, http = log_for(handler)
+    async with http:
+        await log.write_results(rows)
+    (request,) = seen
+    assert request.url.path == "/rest/v1/query_results" and json.loads(request.content) == rows

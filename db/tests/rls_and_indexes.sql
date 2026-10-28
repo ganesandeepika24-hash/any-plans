@@ -634,8 +634,8 @@ begin
     values (gen_random_uuid(), gen_random_uuid(), 'london', 'search', 'q', 'capped');
   begin
     insert into public.queries (id, user_id, city_id, route, query_text, status)
-      values (gen_random_uuid(), gen_random_uuid(), 'london', 'refine', 'q', 'capped');
-    raise exception 'queries accepted route refine';
+      values (gen_random_uuid(), gen_random_uuid(), 'london', 'admin', 'q', 'capped');
+    raise exception 'queries accepted route admin';
   exception when check_violation then null;
   end;
 
@@ -690,6 +690,42 @@ begin
      is distinct from '{"groq": {"calls_per_day": 1000, "tokens_per_day": 200000},
                        "cloudflare": {"calls_per_day": 200, "tokens_per_day": null}}'::jsonb then
     raise exception 'provider_limits v1 is missing, inactive or changed';
+  end if;
+end $$;
+
+-- Migration 018: refine rows say which query they changed; only refine rows do.
+do $$
+declare
+  first_id constant uuid := gen_random_uuid();
+  refine_id constant uuid := gen_random_uuid();
+begin
+  insert into public.queries (id, user_id, city_id, route, query_text, status, filters)
+    values (first_id, gen_random_uuid(), 'london', 'search', 'jazz under £40', 'ok', '{}');
+  insert into public.queries (id, user_id, city_id, route, query_text, status, filters, refines)
+    values (refine_id, gen_random_uuid(), 'london', 'refine', 'cheaper', 'ok', '{}', first_id);
+  begin
+    insert into public.queries (id, user_id, city_id, route, query_text, status, refines)
+      values (gen_random_uuid(), gen_random_uuid(), 'london', 'search', 'q', 'capped', first_id);
+    raise exception 'a search row accepted refines';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into public.queries (id, user_id, city_id, route, query_text, status, refines)
+      values (gen_random_uuid(), gen_random_uuid(), 'london', 'refine', 'q', 'capped', gen_random_uuid());
+    raise exception 'refines accepted a query that doesn''t exist';
+  exception when foreign_key_violation then null;
+  end;
+  delete from public.queries where id = first_id;
+  if (select refines from public.queries where id = refine_id) is not null then
+    raise exception 'deleting a query didn''t clear the refines that pointed at it';
+  end if;
+  if not exists (select 1 from pg_indexes where indexname = 'queries_refines_idx') then
+    raise exception 'queries_refines_idx is missing';
+  end if;
+  if (select value_json from public.config where key = 'refine_steps' and is_active)
+     is distinct from '{"cheaper": 0.5, "closer": 0.3333333333, "min_radius_km": 0.5}'::jsonb
+     or not exists (select 1 from public.config where key = 'refine_prompt' and version = 1 and is_active) then
+    raise exception 'refine_steps or refine_prompt v1 is missing, inactive or changed';
   end if;
 end $$;
 

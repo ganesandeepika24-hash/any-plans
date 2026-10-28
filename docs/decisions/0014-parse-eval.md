@@ -184,3 +184,11 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
 - **Row 62** is unchanged. It has no location, which stands for refused permission.
 - **Ceiling with a perfect model:** still 47/71.
 
+## Refine rows run (28 Oct 2026, decision 0018)
+
+- **Rows 25 and 26 are no longer skipped.** Each carries a `prior`, an earlier search's stored filters, and runs the Refine step on it.
+  - Row 25 ("Make it cheaper" after live music this weekend under £40) expects £20, with the date and Music kept.
+  - Row 26 ("Somewhere closer" after comedy within 3 miles of Soho) expects Soho at about 1 mile, with radius scored.
+- **Model-only scoring** compares `price_change` within budget and `distance_change` within radius.
+- **Ceiling with a perfect model:** end to end 49/73 (67.1%), model only 73/73. The set now runs all 73 rows.
+
