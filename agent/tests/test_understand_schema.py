@@ -56,6 +56,19 @@ def test_result_cards_take_their_fields_from_search_items_columns():
     assert set(ResultOut.model_fields) - {"rank"} == set(columns) - {"venue_id", "similarity"}
 
 
+def test_the_public_search_returns_the_agents_card_fields():
+    # Signed-out filter search (migration 023, decision 0023) returns what the agent's
+    # cards carry, in search_items' order: the app renders both with one card.
+    from app.search import ResultOut
+
+    sql = (REPO / "db" / "migrations" / "023_search_items_public.sql").read_text()
+    body = re.search(r"returns table \((.*?)\)\nlanguage", sql, re.S)
+    columns = re.findall(r"^\s*(\w+) ", body.group(1), re.M)
+    assert columns == [c for c in search_items_columns() if c not in ("venue_id", "similarity")]
+    assert set(columns) == set(ResultOut.model_fields) - {"rank"}
+    assert "search_items(filters, null)" in sql  # no embedding: filters only
+
+
 def test_categories_match_search_items():
     from app.understand.schema import Category
 

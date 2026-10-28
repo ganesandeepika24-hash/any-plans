@@ -108,3 +108,7 @@ Q-02 itself (in the PRD) isn't in the repo, so the `queries` columns below are a
   - `SUPABASE_USER_TOKEN`
 
   It refuses plain http except to localhost, never prints the token, and retries the row read for a few seconds, because the agent writes the row just after it replies. It has 23 tests against a local fake server. 7 deliberate breaks in the script and 4 in migration 012 all fail the suite or the db checks.
+
+## Update 2026-10-28: filter-only search goes through search_items_public (decision 0023)
+
+The filter-only fallback above ("the browser reads `events` directly") is replaced. The browser now calls `search_items_public(filters)` with the publishable key: `search_items` with no embedding, wrapped as a security definer function so it can read its config without opening `config` to the browser. Results match signed-in search for the same filters (PRD F-01). The reason for keeping it out of the agent is unchanged: filters must work when AI search rests or the agent is down.

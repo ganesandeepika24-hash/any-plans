@@ -20,7 +20,8 @@ Sections marked **Not built yet** describe something the step 1.4 plan asks for 
 10. [Result cards](#10-result-cards)
 11. [Errors](#11-errors)
 12. [What the app must send, and what it must ignore](#12-what-the-app-must-send-and-what-it-must-ignore)
-13. [Not built yet](#13-not-built-yet)
+13. [Filter-only search (Supabase)](#13-filter-only-search-supabase)
+14. [Not built yet](#14-not-built-yet)
 
 ## 1. Base URL, CORS and auth
 
@@ -37,7 +38,7 @@ Sections marked **Not built yet** describe something the step 1.4 plan asks for 
 | `POST /parse` | **Yes** | AI search. Counts against the daily cap. |
 | `POST /search` | **Yes** | AI search. Counts against the daily cap. |
 | `POST /refine` | **Yes** | AI search. Counts against the daily cap. |
-| Filter-only search | No | **Not an agent endpoint.** The browser reads `events` from Supabase directly with the publishable key, through the `events_public_read` policy (decision 0013). |
+| Filter-only search | No | **Not an agent endpoint.** The browser calls the database function `search_items_public` through Supabase with the publishable key, signed in or out (decision 0023). See [section 13](#13-filter-only-search-supabase). |
 
 Filters work signed out; AI search needs sign-in (PRD U-01, U-02). Signed out, the app doesn't call the agent's POST routes: it shows the filter panel and a prompt to sign in for AI search.
 
@@ -720,10 +721,116 @@ The agent uses the user's point for that one request and never stores or logs it
 
 - `embedding_text`, `trace_id`, and each result's `score`. They're for the agent's logs and evals. Don't show, store or depend on them.
 - `filters.limit`, if it's ever set.
-- `filters.windows`: the filter panel can't express it, so the URL drops it, and a reload of that URL widens the dates to the whole `date_from` to `date_to` span. See [Not built yet](#13-not-built-yet).
+- `filters.windows`: the filter panel can't express it, so the URL drops it, and a reload of that URL widens the dates to the whole `date_from` to `date_to` span. See [Not built yet](#14-not-built-yet).
 - Any field added to a response later. The app must not break on unknown fields.
 
-## 13. Not built yet
+## 13. Filter-only search (Supabase)
+
+The filter panel's search, for everyone: signed out, signed in, and as the fallback when AI search rests or the agent is down. It doesn't go through the agent, so it keeps working when the agent is asleep or unreachable. **No sign-in needed.**
+
+It runs the same database function the agent's search runs, `search_items`, with no search text. So the same filters give the same events, in the same order, with the same labels, distances and points as the agent gets for them (PRD F-01, decision 0023). A test compares the two paths row for row.
+
+An AI search also ranks by what the words mean. Filter-only search has no words, so for the same filters an AI search can order the same events differently.
+
+### The call
+
+With supabase-js and the publishable key (the user's session token is fine too; it changes nothing):
+
+```js
+const { data, error } = await supabase.rpc("search_items_public", { filters });
+```
+
+That's `POST <SUPABASE_URL>/rest/v1/rpc/search_items_public` with the body `{"filters": {...}}`.
+
+### Request: `filters`
+
+The same `SearchFilters` keys as in [section 3](#3-shared-response-body), all optional: `date_from`, `date_to`, `categories`, `price_min`, `price_max`, `include_unpriced`, `lat`, `lon`, `radius_km`, `limit`.
+
+- The filter panel builds this object from the URL, and an AI search's `filters` can be passed straight in.
+- **The one exception is `windows`.** Only the agent applies it, and this function refuses it (see [Not built yet](#14-not-built-yet)). Remove it before calling.
+- Times must carry an offset (`2026-10-30T17:00:00+00:00`, or `Z`).
+- `lat`, `lon` and `radius_km` go together; `radius_km` is km, from 0 up to 100.
+- `limit` is 1 to 100, and 20 when left out.
+- With no place, send the default area so results match an AI search: the city's centre and radius, `{"lat": 51.507333, "lon": -0.127654, "radius_km": 10}`, and show "Showing central London.". The agent sends those values in `filters` for a default-area search.
+- Unknown keys and bad values are refused (below).
+
+### Response
+
+An array of rows, best first. The order is the rank: there's no `rank` field. Each row has the [result card](#10-result-cards) fields, with the same meaning and the same confidence label, so the app renders both paths with one card. The only differences from the agent's JSON:
+- times come as `+00:00` rather than `Z`
+- numbers keep the database's precision (`distance_m` 251.74325675)
+
+### Example
+
+```js
+await supabase.rpc("search_items_public", {
+  filters: {"categories": ["Music"], "lat": 51.514065, "lon": -0.135049, "radius_km": 1}
+});
+```
+
+`data`, from the function run as the signed-out role against two sample events:
+
+```json
+[
+  {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "source": "ticketmaster",
+    "title": "Late Late Show",
+    "category": "Music",
+    "genre": "Jazz",
+    "start_at": "2026-10-29T22:30:00+00:00",
+    "end_at": "2026-10-30T02:00:00+00:00",
+    "venue_name": "Ronnie Scott's",
+    "price_min": 25,
+    "price_max": 45,
+    "currency": "GBP",
+    "url": "https://www.ticketmaster.co.uk/event/EXAMPLE1",
+    "image_url": "https://s1.ticketm.net/dam/EXAMPLE1.jpg",
+    "last_checked_at": "2026-10-28T03:10:00+00:00",
+    "confidence": "checked_today",
+    "confidence_label": "Price checked today",
+    "distance_m": 251.74325675,
+    "lat": 51.513435,
+    "lon": -0.131566,
+    "score": 0.3176896301101585
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "source": "skiddle",
+    "title": "Jazz Jam",
+    "category": "Music",
+    "genre": null,
+    "start_at": "2026-10-29T20:00:00+00:00",
+    "end_at": null,
+    "venue_name": null,
+    "price_min": null,
+    "price_max": null,
+    "currency": null,
+    "url": "https://www.skiddle.com/whats-on/EXAMPLE2",
+    "image_url": null,
+    "last_checked_at": "2026-10-26T03:10:00+00:00",
+    "confidence": "check_site",
+    "confidence_label": "Check availability on Skiddle",
+    "distance_m": 369.22612028,
+    "lat": 51.513765,
+    "lon": -0.129752,
+    "score": 0.29027728028129096
+  }
+]
+```
+
+### Errors
+
+| What | When | What the app does |
+|---|---|---|
+| `error.code` `"22023"`, with a message naming the filter ("search_items: unknown filter keys {windows}", "…limit must be an integer from 1 to 100") | A bad or unknown filter. | A bug in the app: fix the filters. Don't show the message. |
+| A network error, or a Supabase 5xx | Supabase is unreachable. | Say search is unavailable and offer to try again. |
+
+### Not logged
+
+Filter-only searches aren't logged yet: the function only reads, and signed-out users have no id (principle 7; deferred by the owner, 28 Oct 2026). There's no per-user cap on them either (also deferred).
+
+## 14. Not built yet
 
 What the step 1.4 plan asks for that `main` doesn't do. Each needs an agent change (a feature branch and PR) or an owner decision before the app relies on it.
 
@@ -733,6 +840,6 @@ What the step 1.4 plan asks for that `main` doesn't do. Each needs an agent chan
 | **Venue address** | Only `venue_name`. No address on the card. Each event's point is there (`lat`, `lon`). | Add if the card needs it. |
 | **The 429 cap reply** | The cap is a 200 `ai_resting` with `reason: "daily_cap"` (decision 0013). No endpoint returns 429. | Nothing, unless the plan changes 0013. |
 | **Image licence flag** | `image_url` is whatever the source's API supplies. No per-image licence field. Both current sources allow display from their own URLs (decision 0001). | A flag only if a source with other terms is added. |
-| **Filter-only search** | No agent endpoint. `search_items` is `service_role` only (decision 0010). The browser can read `events` and `venues` with the publishable key (with venue names through the `venue_id` link), but gets no ranking and no `distance_m`, and has to filter by date, price and distance itself. | A decision on how signed-out search gets the same card fields: a public function, a view, or the browser computing them. |
+| **Logging filter-only searches** | `search_items_public` only reads, so filter-only searches aren't logged (principle 7). | A small write path for them. Deferred by the owner (28 Oct 2026). |
 | **`windows` in the URL** | "The next 4 Saturdays" comes back with `filters.windows`, which the filter panel can't express. | A URL form for it, or accept that a reload widens the dates. |
 | **Answer taps** | Taps go back as appended text (section 8). | Nothing for 1.4. A structured answer (e.g. a vibe tap setting `vibe` directly) is a later option (decision 0015). |

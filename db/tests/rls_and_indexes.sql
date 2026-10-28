@@ -945,6 +945,53 @@ begin
   end if;
 end $$;
 
+-- Migration 023: the public filter search (decision 0023). search_items and config stay
+-- closed to the browser roles: the 010 block checks search_items' grants.
+do $$
+declare
+  fn constant regprocedure := 'public.search_items_public(jsonb)'::regprocedure;
+begin
+  if (select provolatile from pg_proc where oid = fn) <> 's' then
+    raise exception 'search_items_public is not stable, so it could write';
+  end if;
+
+  if not (select prosecdef from pg_proc where oid = fn) then
+    raise exception 'search_items_public must be security definer, to read config for anon';
+  end if;
+
+  if (select proconfig from pg_proc where oid = fn) is distinct from array['search_path=""'] then
+    raise exception 'search_items_public must set search_path to empty';
+  end if;
+
+  if (select pg_get_userbyid(proowner) from pg_proc where oid = fn) <> 'postgres' then
+    raise exception 'search_items_public must be owned by postgres, which can read config';
+  end if;
+
+  if not has_function_privilege('anon', fn, 'execute')
+     or not has_function_privilege('authenticated', fn, 'execute')
+     or not has_function_privilege('service_role', fn, 'execute') then
+    raise exception 'anon, authenticated and service_role must all execute search_items_public';
+  end if;
+
+  if exists (select 1 from pg_proc, aclexplode(proacl) a
+              where oid = fn and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+    raise exception 'public can execute search_items_public';
+  end if;
+
+  if has_table_privilege('anon', 'public.config', 'select')
+     or has_table_privilege('authenticated', 'public.config', 'select') then
+    raise exception 'anon or authenticated can read config';
+  end if;
+end $$;
+
+-- anon gets rows through it, as the signed-out browser does.
+do $$
+begin
+  set local role anon;
+  perform * from public.search_items_public('{}');
+  reset role;
+end $$;
+
 rollback;
 
 \echo 'rls_and_indexes: all checks passed'

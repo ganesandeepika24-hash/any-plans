@@ -141,6 +141,42 @@ begin
   end if;
 end $$;
 
+-- The public filter search (migration 023): the same function as the signed-out
+-- browser calls it, as anon, with no embedding. Same data, same 500 ms limit.
+do $$
+declare
+  f jsonb;
+  plan jsonb;
+  times double precision[] := '{}';
+  p95 double precision;
+begin
+  set local role anon;
+  for i in -2..99 loop
+    f := case abs(i) % 3
+      when 0 then '{}'::jsonb
+      when 1 then jsonb_build_object('lat', 51.5074 + (random() - 0.5) * 0.2,
+                                     'lon', -0.1278 + (random() - 0.5) * 0.3,
+                                     'radius_km', 2 + random() * 8,
+                                     'categories', jsonb_build_array('Music', 'Comedy'))
+      else jsonb_build_object('price_max', 20, 'include_unpriced', false,
+                    'date_from', to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                    'date_to', to_char(now() + interval '14 days', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                    'limit', 100)
+    end;
+    execute format('explain (analyze, format json) select * from public.search_items_public(%L::jsonb)', f)
+      into plan;
+    if i >= 0 then
+      times := times || (plan->0->>'Execution Time')::double precision;
+    end if;
+  end loop;
+  reset role;
+  select percentile_cont(0.95) within group (order by t) into p95 from unnest(times) t;
+  raise notice 'search_items_public over 100 searches as anon: p95 % ms', round(p95::numeric, 1);
+  if p95 >= 500 then
+    raise exception 'search_items_public p95 is % ms, over the 500 ms limit', round(p95::numeric, 1);
+  end if;
+end $$;
+
 rollback;
 
 \echo 'search_perf: p95 under 500 ms'
