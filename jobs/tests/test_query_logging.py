@@ -79,7 +79,7 @@ def test_capped_and_resting_rows_have_no_filters(service, overrides):
         {"status": "ok", "filters": None},
         {"status": "ai_resting"},  # resting with filters
         {"status": "pending"},
-        {"route": "search"},
+        {"route": "refine"},
         {"query_text": ""},
         {"query_text": "x" * 501},
         {"trace_id": "not-a-trace"},

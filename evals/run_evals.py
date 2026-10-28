@@ -23,9 +23,12 @@ budget (budget, price_basis) and category (category).
 
 A case where no provider answered (resting) is a provider failure, not a parse failure:
 it's listed with its attempts but left out of both accuracies. Groq calls are paced to
-stay under its tokens-per-minute limit, so a rate limit doesn't swap in the fallback
-model or spend a second call. The run reports tokens per provider against the daily
-limits, which the eval shares with the live app.
+stay under its tokens-per-minute limit. If Groq still rate-limits a call, the runner
+waits as long as Groq asks and retries Groq, rather than letting the node fall back:
+a fallback spends a second call under the cap and swaps in another model (decision
+0016). A wait longer than MAX_RETRY_WAIT_S means Groq's daily limit is used up, so the
+run stops there and the rest of the cases are reported as not run. The run reports
+tokens per provider against the daily limits, which the eval shares with the live app.
 
 Environment (never printed): GROQ_API_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID for
 the providers; SUPABASE_URL and SUPABASE_SERVICE_KEY for --config supabase (the live
@@ -76,6 +79,10 @@ MAX_CALLS = 80
 # usage it reports.
 TOKENS_PER_MINUTE = {"groq": 7200}
 FIRST_CALL_TOKENS = 2500  # a guess for the first call, before any usage is known
+RETRIED_PROVIDERS = ("groq",)
+MAX_RATE_LIMIT_RETRIES = 5  # per call; more in a row stops the run
+MAX_RETRY_WAIT_S = 120.0  # Groq asks for longer only when a daily limit is used up
+DEFAULT_RETRY_WAIT_S = 30.0  # when a 429 has no retry-after
 RADIUS_TOLERANCE_KM = 0.8  # about half a mile (seed doc)
 FIELDS = ("date", "area", "budget", "category", "radius", "vibe", "who")
 REASONS = {
@@ -306,6 +313,50 @@ class TokenPacer:
         self.tokens[provider] += used
 
 
+class RateLimitStop(Exception):
+    """Groq keeps refusing, or asks for a wait that means its daily limit is used up."""
+
+
+class RateLimitRetry:
+    """Retries a rate-limited Groq call after the wait Groq asks for, instead of letting
+    the node fall back to Cloudflare. Other errors pass straight through."""
+
+    def __init__(self, inner, sleep=asyncio.sleep):
+        self.inner = inner
+        self.sleep = sleep
+        self.retries = 0
+        self.waited_s = 0.0
+        self.stopped: str | None = None  # why the run stopped, if it did
+
+    async def complete(self, config, system, user, schema) -> Completion:
+        try:
+            return await self._complete(config, system, user, schema)
+        except RateLimitStop as exc:
+            self.stopped = str(exc)
+            raise
+
+    async def _complete(self, config, system, user, schema) -> Completion:
+        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                return await self.inner.complete(config, system, user, schema)
+            except LLMError as exc:
+                if config.provider not in RETRIED_PROVIDERS or exc.outcome != "http_429":
+                    raise
+                wait = exc.retry_after_s if exc.retry_after_s is not None else DEFAULT_RETRY_WAIT_S
+                if wait > MAX_RETRY_WAIT_S:
+                    raise RateLimitStop(
+                        f"{config.provider} asks to wait {wait:.0f} s: its daily limit is used up"
+                    ) from exc
+                if attempt == MAX_RATE_LIMIT_RETRIES:
+                    raise RateLimitStop(
+                        f"{config.provider} refused {attempt + 1} times in a row"
+                    ) from exc
+                self.retries += 1
+                self.waited_s += wait
+                await self.sleep(wait)
+        raise AssertionError("unreachable")
+
+
 class Clock:
     def __init__(self):
         self.now: datetime | None = None
@@ -349,18 +400,25 @@ async def run_cases(
     providers: int,
 ) -> list[CaseResult]:
     results = []
+    stopped: str | None = None
     for case in cases:
         base = CaseResult(case["id"], case["row"], case["query"], "not_run")
         if case.get("skip"):
             base.status = f"skipped:{case['skip']}"
             results.append(base)
             continue
-        if llm.calls + providers > llm.max_calls:
-            results.append(base)  # could pass the cap: not started
+        if stopped or llm.calls + providers > llm.max_calls:
+            results.append(base)  # could pass the cap, or the run stopped: not started
             continue
         clock.now = _moment(case["now"])
         loc = case.get("location")
-        result = await understander.run(case["query"], Point(**loc) if loc else None)
+        try:
+            result = await understander.run(case["query"], Point(**loc) if loc else None)
+        except RateLimitStop as exc:
+            stopped = str(exc)
+            print(f"Stopped at r{case['row']:02d}: {stopped}", file=sys.stderr)
+            results.append(base)
+            continue
         results.append(
             CaseResult(
                 case["id"],
@@ -438,7 +496,10 @@ def report(summary: dict, results: list[CaseResult]) -> str:
     if "tokens" in summary:
         out.append(
             f"  tokens {summary['tokens']}, waited {summary['paced_wait_s']:.0f} s for Groq's limit"
+            f", {summary['rate_limit_retries']} rate-limit retries"
         )
+    if summary.get("stopped"):
+        out.append(f"  STOPPED EARLY: {summary['stopped']}")
     out += ["", "Failures (end to end | model only):"]
     for r in results:
         if not r.scored or all(r.passed):
@@ -549,7 +610,10 @@ async def main_async(args) -> int:
             ),
             TOKENS_PER_MINUTE,
         )
-        llm = CountingLLM(pacer, args.max_calls)
+        # Retries sit inside the counter: a refused call spends nothing, so it doesn't
+        # count toward the cap. They go through the pacer like any call.
+        retry = RateLimitRetry(pacer)
+        llm = CountingLLM(retry, args.max_calls)
         clock = Clock()
         understander = Understander(store, llm, tracer, clock=clock)
         city = await store.city("london")
@@ -563,6 +627,9 @@ async def main_async(args) -> int:
             "max_calls": args.max_calls,
             "tokens": dict(pacer.tokens),
             "paced_wait_s": round(pacer.waited_s, 1),
+            "rate_limit_retries": retry.retries,
+            "rate_limit_wait_s": round(retry.waited_s, 1),
+            "stopped": retry.stopped,
         }
         run_id = f"eval-{datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
         summary["run_id"] = run_id

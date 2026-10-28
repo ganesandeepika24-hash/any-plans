@@ -623,6 +623,76 @@ begin
   end loop;
 end $$;
 
+-- Migration 016: search rows, and the daily provider counters.
+do $$
+declare
+  fn regprocedure;
+  d constant date := '2030-01-01';
+  got boolean[];
+begin
+  insert into public.queries (id, user_id, city_id, route, query_text, status)
+    values (gen_random_uuid(), gen_random_uuid(), 'london', 'search', 'q', 'capped');
+  begin
+    insert into public.queries (id, user_id, city_id, route, query_text, status)
+      values (gen_random_uuid(), gen_random_uuid(), 'london', 'refine', 'q', 'capped');
+    raise exception 'queries accepted route refine';
+  exception when check_violation then null;
+  end;
+
+  foreach fn in array array[
+      'public.reserve_provider_call(text, date, integer, integer)'::regprocedure,
+      'public.add_provider_tokens(text, date, integer, integer)'::regprocedure] loop
+    if has_function_privilege('anon', fn, 'execute')
+       or has_function_privilege('authenticated', fn, 'execute')
+       or exists (select 1 from pg_proc, aclexplode(proacl) a
+                   where oid = fn and a.grantee = 0 and a.privilege_type = 'EXECUTE')
+       or not has_function_privilege('service_role', fn, 'execute')
+       or (select proconfig from pg_proc where oid = fn) is distinct from array['search_path=""']
+       or (select prosecdef from pg_proc where oid = fn) then
+      raise exception '% must be security invoker, empty search_path, service_role only', fn;
+    end if;
+  end loop;
+
+  -- Three calls allowed: the fourth is refused and not counted.
+  select array_agg(public.reserve_provider_call('test_llm', d, 3)) into got
+    from generate_series(1, 4);
+  if got <> array[true, true, true, false]
+     or (select calls from public.usage_daily where date = d and service = 'test_llm') <> 3 then
+    raise exception 'reserve_provider_call allowed % with calls %', got,
+      (select calls from public.usage_daily where date = d and service = 'test_llm');
+  end if;
+  -- A higher limit later in the day lets calls through again; the next day starts at 0.
+  if not public.reserve_provider_call('test_llm', d, 4)
+     or not public.reserve_provider_call('test_llm', d + 1, 1)
+     or public.reserve_provider_call('test_llm', d + 1, 1) then
+    raise exception 'reserve_provider_call ignored a new limit or a new day';
+  end if;
+  -- Tokens add up, and the token limit stops calls once reached.
+  perform public.add_provider_tokens('test_tok', d, 1500, 2000);
+  if not public.reserve_provider_call('test_tok', d, 100, 2000) then
+    raise exception 'refused under the token limit';
+  end if;
+  perform public.add_provider_tokens('test_tok', d, 600, 2000);
+  if public.reserve_provider_call('test_tok', d, 100, 2000)
+     or (select calls from public.usage_daily where date = d and service = 'test_tok_tokens') <> 2100 then
+    raise exception 'the token limit didn''t stop calls';
+  end if;
+  -- No limit, or a zero limit, allows nothing; negative tokens add nothing.
+  if public.reserve_provider_call('test_zero', d, 0) or public.reserve_provider_call('test_zero', d, null) then
+    raise exception 'reserve_provider_call allowed a call with no call limit';
+  end if;
+  perform public.add_provider_tokens('test_tok', d, -500);
+  if (select calls from public.usage_daily where date = d and service = 'test_tok_tokens') <> 2100 then
+    raise exception 'negative tokens changed the count';
+  end if;
+
+  if (select value_json from public.config where key = 'provider_limits' and is_active)
+     is distinct from '{"groq": {"calls_per_day": 1000, "tokens_per_day": 200000},
+                       "cloudflare": {"calls_per_day": 200, "tokens_per_day": null}}'::jsonb then
+    raise exception 'provider_limits v1 is missing, inactive or changed';
+  end if;
+end $$;
+
 -- Migration 012: authenticated reads only its own queries rows.
 do $$
 declare

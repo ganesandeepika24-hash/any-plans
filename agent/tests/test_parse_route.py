@@ -40,9 +40,11 @@ CAP = {"per_user_per_day": 10}
 class FakeQueryLog:
     def __init__(self):
         self.rows: list[dict] = []
+        self.results: list[dict] = []
         self.since: list[datetime] = []
         self.fail_count = False
         self.fail_write = False
+        self.fail_results = False
 
     async def count_today(self, user_id, since):
         if self.fail_count:
@@ -56,6 +58,13 @@ class FakeQueryLog:
         if self.fail_write:
             raise QueryLogError("couldn't write the queries row: ConnectError")
         self.rows.append(row)
+
+    async def write_results(self, rows):
+        if self.fail_results:
+            raise QueryLogError("couldn't write query_results: ConnectError")
+        # query_results references queries: the row must already be there.
+        assert all(r["query_id"] in {q["id"] for q in self.rows} for r in rows)
+        self.results.extend(rows)
 
     def preload(self, n, status="ok", user=USER):
         for _ in range(n):

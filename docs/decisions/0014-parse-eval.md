@@ -167,3 +167,12 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
   - On 28 Oct the owner kept rule 3's reading instead (a bare weekday is the coming one), so the date resolves to 31 Oct. Rows 4, 6, 12, 13, 14, 27, 31 and 59 depend on the same reading.
 - **Ceiling with a perfect model:** unchanged at 47/71 end to end. Row 39 passes with a perfect model, as before.
 - **Eval with prompt v3:** pending. It runs on the PR's branch with `--config repo`.
+
+## Eval rerun pending (28 Oct 2026)
+
+- **On hold:** Groq's daily limit is used up, so no eval runs until the owner says it has reset. The prompt v3 run for 0015 is on hold too.
+- **The rerun:** after stage 1's steps 1 to 5, a run on a branch from `main` with `--config repo`, recorded here as a change from the paced baseline (43.7% / 57.8%).
+- **What's different since the baseline** (decision 0016):
+  - The runner waits and retries on a Groq 429, rather than falling back.
+  - A daily-limit wait stops the run cleanly, with the remaining cases `not_run`.
+

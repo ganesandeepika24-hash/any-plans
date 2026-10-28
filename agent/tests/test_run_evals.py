@@ -323,6 +323,74 @@ def test_resting_cases_send_no_langfuse_scores():
     assert asyncio.run(go()) == 0 and seen == []
 
 
+# Rate-limit retries (decision 0016) ---------------------------------------------------
+
+
+def retrying(cases, script, max_calls=80):
+    """run(), with the runner's retry between the counter and the providers."""
+    waits = []
+
+    async def sleep(s):
+        waits.append(s)
+
+    retry = run_evals.RateLimitRetry(FakeLLM(**script), sleep=sleep)
+    llm = run_evals.CountingLLM(retry, max_calls)
+    clock = run_evals.Clock()
+    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 3}))
+    understander = Understander(store, llm, RecordingTracer(), clock=clock)
+    results = asyncio.run(run_evals.run_cases(cases, understander, llm, clock, CITY, 2))
+    return results, llm, retry, waits
+
+
+def limited(seconds=7.0):
+    return LLMError("http_429", "rate limited", retry_after_s=seconds)
+
+
+def test_a_groq_rate_limit_waits_and_retries_groq_instead_of_falling_back():
+    reply = json.dumps(BY_ROW[64]["reply"])
+    results, llm, retry, waits = retrying(
+        [BY_ROW[64]], {"groq": [limited(7), limited(12), reply], "cloudflare": [reply]}
+    )
+    (r,) = results
+    assert (r.status, r.provider, r.attempts) == ("ok", "groq", ["groq:ok"])
+    assert waits == [7, 12] and (retry.retries, retry.waited_s) == (2, 19)
+    assert llm.calls == 1  # refused calls spend nothing, so they don't count toward the cap
+    assert llm.inner.inner.script["cloudflare"] == [reply]  # Cloudflare never called
+
+
+def test_a_429_without_retry_after_waits_the_default():
+    reply = json.dumps(BY_ROW[64]["reply"])
+    _, _, _, waits = retrying([BY_ROW[64]], {"groq": [limited(None), reply], "cloudflare": []})
+    assert waits == [run_evals.DEFAULT_RETRY_WAIT_S]
+
+
+def test_a_long_wait_means_the_daily_limit_and_stops_the_run():
+    reply = json.dumps(BY_ROW[64]["reply"])
+    cases = [BY_ROW[64], BY_ROW[72], BY_ROW[73]]
+    results, llm, retry, waits = retrying(
+        cases, {"groq": [reply, limited(3600)], "cloudflare": [reply, reply]}
+    )
+    assert [r.status for r in results] == ["ok", "not_run", "not_run"]
+    assert waits == [] and "daily limit" in retry.stopped
+    assert run_evals.summarise(results)["not_run"] == 2
+
+
+def test_too_many_rate_limits_in_a_row_stop_the_run():
+    n = run_evals.MAX_RATE_LIMIT_RETRIES + 1
+    results, _, retry, waits = retrying([BY_ROW[64]], {"groq": [limited(1)] * n, "cloudflare": []})
+    assert results[0].status == "not_run" and len(waits) == n - 1
+    assert "in a row" in retry.stopped
+
+
+def test_other_errors_still_fall_back_and_cloudflare_isnt_retried():
+    reply = json.dumps(BY_ROW[64]["reply"])
+    slow = LLMError("timeout", "slow")
+    results, _, _, waits = retrying([BY_ROW[64]], {"groq": [slow], "cloudflare": [reply]})
+    assert results[0].provider == "cloudflare" and waits == []
+    results, _, _, waits = retrying([BY_ROW[64]], {"groq": [slow], "cloudflare": [limited(5)]})
+    assert results[0].status == "ai_resting" and waits == []
+
+
 # Pacing ----------------------------------------------------------------------------
 
 
@@ -463,11 +531,31 @@ def test_a_real_run_paces_groq_and_reports_tokens(monkeypatch, tmp_path):
             made.append(limits)
 
     monkeypatch.setattr(run_evals, "TokenPacer", Recording)
+    retries = []
+
+    class RecordingRetry(run_evals.RateLimitRetry):
+        def __init__(self, inner, **kw):
+            super().__init__(inner, **kw)
+            retries.append(inner)
+
+    monkeypatch.setattr(run_evals, "RateLimitRetry", RecordingRetry)
+    counted = []
+
+    class RecordingCount(run_evals.CountingLLM):
+        def __init__(self, inner, max_calls):
+            super().__init__(inner, max_calls)
+            counted.append(inner)
+
+    monkeypatch.setattr(run_evals, "CountingLLM", RecordingCount)
     out = tmp_path / "r.json"
     run_evals.main(["--config", "repo", "--max-calls", "2", "--out", str(out)])
     assert made == [{"groq": 7200}]
+    assert len(retries) == 1 and isinstance(retries[0], Recording)  # retries go through pacing
+    # The counter wraps the retry, so refused calls don't count toward the cap.
+    assert len(counted) == 1 and isinstance(counted[0], RecordingRetry)
     summary = json.loads(out.read_text())["summary"]
     assert (summary["tokens"], summary["paced_wait_s"]) == ({}, 0.0)
+    assert (summary["rate_limit_retries"], summary["stopped"]) == (0, None)
     assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 3}
 
 

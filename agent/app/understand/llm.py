@@ -29,6 +29,8 @@ Outcome = Literal[
     "truncated",
     "invalid_json",
     "schema",
+    "daily_limit",  # our own daily counter refused the call (decision 0016)
+    "usage_unavailable",  # the counter couldn't be checked, so no call was made
 ]
 
 
@@ -66,10 +68,17 @@ class Completion:
 
 
 class LLMError(Exception):
-    def __init__(self, outcome: Outcome, message: str, usage: Usage | None = None):
+    def __init__(
+        self,
+        outcome: Outcome,
+        message: str,
+        usage: Usage | None = None,
+        retry_after_s: float | None = None,
+    ):
         super().__init__(message)
         self.outcome = outcome
         self.usage = usage or Usage()
+        self.retry_after_s = retry_after_s  # from a 429's retry-after header, if it had one
 
 
 class LLMClient(Protocol):
@@ -141,7 +150,11 @@ class OpenAICompatibleClient:
 
         if response.status_code == 429:
             retry_after = response.headers.get("retry-after")
-            raise LLMError("http_429", f"rate limited (retry-after {retry_after})")
+            raise LLMError(
+                "http_429",
+                f"rate limited (retry-after {retry_after})",
+                retry_after_s=_seconds(retry_after),
+            )
         if response.status_code >= 500:
             raise LLMError("http_5xx", f"HTTP {response.status_code}")
         if response.status_code >= 400:
@@ -168,6 +181,15 @@ class OpenAICompatibleClient:
         if not (self._cf_token and self._cf_account):
             raise LLMError("no_key", "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set")
         return CLOUDFLARE_URL.format(account_id=self._cf_account), self._cf_token
+
+
+def _seconds(value: str | None) -> float | None:
+    """retry-after in seconds. The HTTP-date form isn't used by either provider."""
+    try:
+        seconds = float(value) if value is not None else None
+    except ValueError:
+        return None
+    return seconds if seconds is not None and seconds >= 0 else None
 
 
 def _usage(raw: Any) -> Usage:
