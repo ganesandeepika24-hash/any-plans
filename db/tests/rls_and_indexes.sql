@@ -922,6 +922,29 @@ begin
   end if;
 end $$;
 
+-- Migration 022: search_items' coordinates and confidence label (decision 0022). The
+-- 010 block above checks the function's volatility, search_path and grants; 022 created
+-- it again, so they cover 022's version.
+do $$
+declare
+  fn constant regprocedure := 'public.search_items(jsonb, extensions.vector)'::regprocedure;
+  labels jsonb;
+begin
+  if (select array_agg(n order by n) from unnest((select proargnames from pg_proc where oid = fn)) n
+       where n in ('lat', 'lon', 'confidence', 'confidence_label'))
+     is distinct from array['confidence', 'confidence_label', 'lat', 'lon'] then
+    raise exception 'search_items does not return lat, lon, confidence and confidence_label';
+  end if;
+
+  select value_json into labels from public.config where key = 'confidence_labels' and is_active;
+  if labels is distinct from
+     '{"fresh_hours": 24,
+       "sources": {"ticketmaster": {"site": "Ticketmaster", "kind": "official"},
+                   "skiddle": {"site": "Skiddle", "kind": "official"}}}'::jsonb then
+    raise exception 'confidence_labels version 1 is missing, inactive or not 022''s rule';
+  end if;
+end $$;
+
 rollback;
 
 \echo 'rls_and_indexes: all checks passed'

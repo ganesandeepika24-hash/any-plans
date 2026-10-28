@@ -26,7 +26,11 @@ def event_row(n: int, **fields: Any) -> dict[str, Any]:
         "url": f"https://example.com/{n}",
         "image_url": None,
         "last_checked_at": "2026-10-28T06:00:00+00:00",
+        "confidence": "checked_today",
+        "confidence_label": "Price checked today",
         "distance_m": 350.0,
+        "lat": 51.5133,
+        "lon": -0.1318,
         "similarity": 0.8,
         "score": 1.0 - n / 100,
     } | fields

@@ -165,6 +165,40 @@ def test_no_events_logs_no_results(signing_key, token):
     assert body["results"] == [] and h.log.results == []
 
 
+def test_results_carry_the_label_and_the_events_point_as_search_items_sent_them(signing_key, token):
+    rows = [
+        event_row(1),
+        event_row(
+            2,
+            source="skiddle",
+            confidence="check_site",
+            confidence_label="Check availability on Skiddle",
+            lat=None,
+            lon=None,
+        ),
+    ]
+    body = Harness(signing_key, backend=FakeSearch(rows)).post({"query": "jazz"}, token).json()
+    first, second = body["results"]
+    assert (first["confidence"], first["confidence_label"]) == (
+        "checked_today",
+        "Price checked today",
+    )
+    assert (first["lat"], first["lon"]) == (51.5133, -0.1318)
+    assert (second["confidence"], second["confidence_label"]) == (
+        "check_site",
+        "Check availability on Skiddle",
+    )
+    assert (second["lat"], second["lon"]) == (None, None)
+
+
+def test_rows_without_022s_label_answer_search_unavailable(signing_key, token):
+    old = event_row(1)
+    del old["confidence"], old["confidence_label"], old["lat"], old["lon"]
+    h = Harness(signing_key, backend=FakeSearch([old]))
+    body = h.post({"query": "jazz tonight"}, token).json()
+    assert (body["status"], body["results"], body["message"]) == ("ok", None, SEARCH_UNAVAILABLE)
+
+
 # The Search node --------------------------------------------------------------------
 
 
@@ -190,9 +224,12 @@ async def test_an_event_gone_before_the_lookup_is_dropped_and_ranks_close_up():
     assert [(h.result.rank, h.result.title) for h in hits] == [(1, "Event 2"), (2, "Event 3")]
 
 
-async def test_a_row_search_items_shouldnt_return_is_a_search_error():
+@pytest.mark.parametrize(
+    "fields", [{"title": None}, {"confidence": "verified"}, {"confidence_label": None}]
+)
+async def test_a_row_search_items_shouldnt_return_is_a_search_error(fields):
     with pytest.raises(SearchError):
-        await SearchNode(FakeSearch([event_row(1, title=None)]), FakeEmbed()).run({}, "jazz")
+        await SearchNode(FakeSearch([event_row(1, **fields)]), FakeEmbed()).run({}, "jazz")
 
 
 # Windows: the next 4 Saturdays (decision 0020) ----------------------------------------

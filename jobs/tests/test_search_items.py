@@ -482,3 +482,191 @@ def test_only_service_role_may_call_it(db_url, add, role):
             conn.execute("select * from public.search_items('{}')")
         conn.execute("set role service_role")
         assert conn.execute("select title from public.search_items('{}')").fetchall() == [("gig",)]
+
+
+# Coordinates and the confidence label (migration 022, decision 0022) -------------
+
+
+@pytest.fixture
+def labels(db_url):
+    """Each test starts and ends on 022's confidence_labels (version 1). Returns a
+    function that activates a new version with `value`."""
+
+    def reset():
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            conn.execute("select public.set_active_config('confidence_labels', 1)")
+            conn.execute(
+                "delete from public.config where key = 'confidence_labels' and version > 1"
+            )
+
+    def use(value):
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            version = conn.execute(
+                "select max(version) + 1 from config where key = 'confidence_labels'"
+            ).fetchone()[0]
+            conn.execute(
+                "insert into config (key, version, value_json, updated_by, is_active)"
+                " values ('confidence_labels', %s, %s, 'test', false)",
+                (version, psycopg.types.json.Jsonb(value)),
+            )
+            conn.execute("select set_active_config('confidence_labels', %s)", (version,))
+
+    reset()
+    yield use
+    reset()
+
+
+@pytest.fixture
+def checked(db, sql, t0):
+    """Insert an event from `source`, last checked `hours_ago` before now (None: never).
+    Returns its id."""
+
+    def insert(title, source="ticketmaster", hours_ago=1.0, price=(20, 40), point=CENTRE):
+        geom = None if point is None else f"SRID=4326;POINT({point[1]} {point[0]})"
+        return sql(
+            """
+            insert into events (city_id, source, source_id, title, category, start_at,
+                                price_min, price_max, geom, last_checked_at)
+            values ('london', %s, %s, %s, 'Music', %s, %s, %s, %s::extensions.geography,
+                    now() - make_interval(secs => %s))
+            returning id
+            """,
+            (
+                source,
+                title,
+                title,
+                t0,
+                *price,
+                geom,
+                None if hours_ago is None else hours_ago * 3600,
+            ),
+        )[0][0]
+
+    return insert
+
+
+def labelled(rows) -> dict[str, tuple[str, str]]:
+    return {r["title"]: (r["confidence"], r["confidence_label"]) for r in rows}
+
+
+CHECKED = ("checked_today", "Price checked today")
+
+
+def test_rows_carry_the_events_own_point(checked, search):
+    checked("placed", point=(51.5155, -0.1320))
+    checked("nowhere", point=None)
+    rows = {r["title"]: r for r in search()}
+    assert (rows["placed"]["lat"], rows["placed"]["lon"]) == pytest.approx((51.5155, -0.1320))
+    assert (rows["nowhere"]["lat"], rows["nowhere"]["lon"]) == (None, None)
+
+
+def test_the_point_is_the_one_distance_is_measured_from(checked, search):
+    checked("gig", point=(51.52, -0.10))
+    (row,) = search({"lat": 51.52, "lon": -0.10, "radius_km": 1})
+    assert row["distance_m"] == pytest.approx(0, abs=0.01)
+    assert (row["lat"], row["lon"]) == pytest.approx((51.52, -0.10))
+
+
+def test_an_official_check_within_24_hours_says_price_checked_today(checked, search, labels):
+    checked("fresh", hours_ago=23.5)
+    checked("skiddle fresh", source="skiddle", hours_ago=1)
+    assert labelled(search()) == {"fresh": CHECKED, "skiddle fresh": CHECKED}
+
+
+def test_an_older_or_missing_check_says_check_availability(checked, search, labels):
+    checked("stale", hours_ago=24.5)
+    checked("never", hours_ago=None)
+    checked("skiddle stale", source="skiddle", hours_ago=30)
+    assert labelled(search()) == {
+        "stale": ("check_site", "Check availability on Ticketmaster"),
+        "never": ("check_site", "Check availability on Ticketmaster"),
+        "skiddle stale": ("check_site", "Check availability on Skiddle"),
+    }
+
+
+def test_no_price_never_says_price_checked(checked, search, labels):
+    # Owner's choice (a), 28 Oct 2026: "Price checked today" above "Price not listed"
+    # would be a claim the data can't back (principle 6).
+    checked("unpriced", hours_ago=1, price=(None, None))
+    checked("max only", hours_ago=1, price=(None, 30))
+    checked("min only", hours_ago=1, price=(15, None))
+    assert labelled(search()) == {
+        "unpriced": ("check_site", "Check availability on Ticketmaster"),
+        "max only": CHECKED,
+        "min only": CHECKED,
+    }
+
+
+def test_free_is_a_price(checked, search, labels):
+    checked("free", hours_ago=1, price=(0, 0))
+    assert labelled(search()) == {"free": CHECKED}
+
+
+def test_an_unlisted_source_is_never_official(checked, search, labels):
+    checked("mystery", source="test", hours_ago=0)
+    assert labelled(search()) == {
+        "mystery": ("check_site", "Check availability on the booking site")
+    }
+
+
+def test_web_sources_say_found_on_the_web_today(checked, search, labels):
+    labels(
+        {
+            "fresh_hours": 24,
+            "sources": {"tavily": {"site": "the web", "kind": "web"}},
+        }
+    )
+    checked("web", source="tavily", hours_ago=None, price=(None, None))
+    checked("ticketmaster now unlisted", hours_ago=1)
+    assert labelled(search()) == {
+        "web": ("web", "Found on the web today"),
+        "ticketmaster now unlisted": ("check_site", "Check availability on the booking site"),
+    }
+
+
+def test_the_window_and_site_names_come_from_config(checked, search, labels):
+    checked("two hours", hours_ago=2)
+    labels(
+        {
+            "fresh_hours": 1,
+            "sources": {"ticketmaster": {"site": "Ticketmaster UK", "kind": "official"}},
+        }
+    )
+    assert labelled(search()) == {
+        "two hours": ("check_site", "Check availability on Ticketmaster UK")
+    }
+
+
+def test_the_label_never_changes_which_rows_or_their_order(checked, search, labels):
+    for n, hours in enumerate([1, 30, None, 5]):
+        checked(f"e{n}", hours_ago=hours)
+    before = search()
+    labels({"fresh_hours": 1000, "sources": {}})
+    after = search()
+    assert titles(after) == titles(before)
+    assert [r["score"] for r in after] == pytest.approx([r["score"] for r in before])
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"sources": {}},
+        {"fresh_hours": 0, "sources": {}},
+        {"fresh_hours": "24", "sources": {}},
+        {"fresh_hours": 24},
+        {"fresh_hours": 24, "sources": []},
+        {"fresh_hours": 24, "sources": {"x": {"kind": "official"}}},
+        {"fresh_hours": 24, "sources": {"x": {"site": "X"}}},
+        {"fresh_hours": 24, "sources": {"x": {"site": "X", "kind": "verified"}}},
+    ],
+)
+def test_bad_label_config_is_an_error(search, labels, value):
+    labels(value)
+    with pytest.raises(psycopg.errors.InvalidParameterValue, match="confidence_labels"):
+        search()
+
+
+def test_no_active_label_config_is_an_error(search, sql, labels):
+    sql("update config set is_active = false where key = 'confidence_labels'")
+    with pytest.raises(psycopg.errors.InvalidParameterValue, match="confidence_labels"):
+        search()
