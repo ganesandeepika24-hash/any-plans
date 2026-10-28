@@ -1,19 +1,20 @@
 """Config and city context from Supabase, through PostgREST with the service key.
 
 Config is reread every minute, so a set_active_config switch reaches the agent within
-a minute and without a redeploy (principle 8). City context (time zone and areas)
-changes only with the seeds, so it's kept for an hour. If a refresh fails, the last
-good value is used; with none, the error propagates.
+a minute and without a redeploy (principle 8). City context (time zone, areas and
+calendar) changes only with the seeds, so it's kept for an hour. If a refresh fails,
+the last good value is used; with none, the error propagates.
 """
 
 import time
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.understand.resolve import Area, City
+from app.understand.resolve import Area, CalendarDate, City
 
 CONFIG_TTL_S = 60.0
 CONTEXT_TTL_S = 3600.0
@@ -113,7 +114,7 @@ class SupabaseStore:
 
 
 def city_from_context(context: dict[str, Any]) -> City:
-    """Build a City from understand_context's jsonb (migration 011)."""
+    """Build a City from understand_context's jsonb (migrations 011 and 019)."""
     areas = tuple(
         Area(
             id=a["id"],
@@ -125,5 +126,22 @@ def city_from_context(context: dict[str, Any]) -> City:
         )
         for a in context["areas"]
     )
+    calendar = tuple(
+        CalendarDate(
+            id=d["id"],
+            name=d["name"],
+            aliases=tuple(d.get("aliases") or ()),
+            first=date.fromisoformat(d["starts_on"]),
+            last=date.fromisoformat(d["ends_on"]),
+            estimate=bool(d["estimate"]),
+        )
+        for d in context.get("calendar") or ()
+    )
     city = context["city"]
-    return City(id=city["id"], name=city["name"], tz=ZoneInfo(city["timezone"]), areas=areas)
+    return City(
+        id=city["id"],
+        name=city["name"],
+        tz=ZoneInfo(city["timezone"]),
+        areas=areas,
+        calendar=calendar,
+    )

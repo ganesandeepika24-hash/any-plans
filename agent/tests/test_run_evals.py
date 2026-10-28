@@ -31,6 +31,7 @@ CASES = run_evals.load_cases()
 BY_ROW = {c["row"]: c for c in CASES}
 CITY = london()
 REASONS = {"location", "date", "budget", "price_basis", "event_date", "category"}
+VERSIONS = {"llm_understand": 2, "understand_prompt": 5, "refine_prompt": 2}  # what ships
 
 # What a perfect model still fails end to end today: resolver and calendar gaps, each
 # named in decision 0014. When the resolver learns one, move it out of this list.
@@ -43,20 +44,16 @@ CEILING_FAILURES = {
     23: ["date"],  # "Friday night" starts at 17:00; a weekday is the whole day
     28: ["area"],  # Hampstead
     33: ["area"],  # Wembley
-    34: ["date", "area"],  # Remembrance Sunday (no calendar); central London
+    34: ["area"],  # central London
     35: ["area"],  # Regent Street
     36: ["date", "area"],  # "this winter"; Somerset House
-    42: ["date", "area"],  # Hanukkah; Golders Green
+    42: ["area"],  # Golders Green
     44: ["area"],  # Richmond Park isn't an area name
-    46: ["date", "area"],  # Chinese New Year; Chinatown
-    47: ["date"],  # Pancake Day
-    48: ["date"],  # half-term
-    49: ["date"],  # Mother's Day
-    52: ["date", "area"],  # Eid; Whitechapel
-    53: ["date", "area"],  # Vaisakhi; Southall
-    55: ["date", "area"],  # Chelsea Flower Show dates and venue
+    46: ["area"],  # Chinatown
+    52: ["area"],  # Whitechapel
+    53: ["area"],  # Southall
+    55: ["area"],  # the Chelsea Flower Show's venue
     56: ["area"],  # central London
-    57: ["date"],  # an event with a weekday resolves to the weekday instead of asking
     58: ["area"],  # Liverpool Street
     68: ["date"],  # date ranges
 }
@@ -65,7 +62,7 @@ CEILING_FAILURES = {
 def run(cases, script, max_calls=80, providers=1, tracer=None):
     llm = run_evals.CountingLLM(FakeLLM(**script), max_calls)
     clock = run_evals.Clock()
-    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 4}))
+    store = FakeStore(entries(versions=VERSIONS))
     if providers == 1:
         store.entries["llm_understand"].value["providers"] = store.entries["llm_understand"].value[
             "providers"
@@ -182,7 +179,7 @@ def test_a_perfect_model_fails_end_to_end_only_on_known_resolver_gaps():
     }
     assert failed == CEILING_FAILURES
     summary = run_evals.summarise(results)
-    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (49, 73)
+    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (53, 73)
 
 
 # Scoring catches mistakes ----------------------------------------------------------
@@ -361,7 +358,7 @@ def retrying(cases, script, max_calls=80):
     retry = run_evals.RateLimitRetry(FakeLLM(**script), sleep=sleep)
     llm = run_evals.CountingLLM(retry, max_calls)
     clock = run_evals.Clock()
-    store = FakeStore(entries(versions={"llm_understand": 2, "understand_prompt": 4}))
+    store = FakeStore(entries(versions=VERSIONS))
     understander = Understander(store, llm, RecordingTracer(), clock=clock)
     results = asyncio.run(run_evals.run_cases(cases, understander, llm, clock, CITY, 2))
     return results, llm, retry, waits
@@ -581,7 +578,7 @@ def test_a_real_run_paces_groq_and_reports_tokens(monkeypatch, tmp_path):
     summary = json.loads(out.read_text())["summary"]
     assert (summary["tokens"], summary["paced_wait_s"]) == ({}, 0.0)
     assert (summary["rate_limit_retries"], summary["stopped"]) == (0, None)
-    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 4}
+    assert summary["config_versions"] == {"llm_understand": 2, "understand_prompt": 5}
 
 
 def test_supabase_config_needs_its_keys(monkeypatch, tmp_path):
@@ -601,7 +598,7 @@ def test_max_calls_above_80_is_refused():
 def test_the_report_gives_both_numbers_and_the_failures():
     results, _ = run(CASES, perfect(CASES))
     text = run_evals.report(run_evals.summarise(results), results)
-    assert "end to end: 67.1% (49/73 cases)" in text
+    assert "end to end: 72.6% (53/73 cases)" in text
     assert "model only: 100.0% (73/73 cases)" in text
     assert "r68 '14 to 15 November, Shoreditch': date | -" in text
 
@@ -630,7 +627,7 @@ def test_scores_go_to_langfuse_with_versions_and_failed_fields():
     e2e = bodies[("r68", "parse_end_to_end")]
     assert (e2e["value"], e2e["comment"]) == (0, "failed: date")
     assert e2e["traceId"] == results[1].trace_id
-    assert e2e["metadata"]["understand_prompt_version"] == 4
+    assert e2e["metadata"]["understand_prompt_version"] == 5
     assert e2e["metadata"]["llm_understand_version"] == 2
     assert bodies[("r64", "parse_model_only")]["value"] == 1
 

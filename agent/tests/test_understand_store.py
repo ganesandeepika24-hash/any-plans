@@ -1,6 +1,7 @@
 """Config and city context through PostgREST, against httpx.MockTransport."""
 
 import json
+from datetime import date
 
 import httpx
 import pytest
@@ -26,6 +27,16 @@ CONTEXT = {
             "lat": 51.5136,
             "lon": -0.1365,
             "default_radius_km": 1,
+        }
+    ],
+    "calendar": [
+        {
+            "id": "london-2027-eid-al-fitr",
+            "name": "Eid al-Fitr",
+            "aliases": ["Eid"],
+            "starts_on": "2027-03-09",
+            "ends_on": "2027-03-10",
+            "estimate": True,
         }
     ],
 }
@@ -144,6 +155,31 @@ async def test_city_context_comes_from_understand_context_and_is_kept_an_hour():
         "Europe/London",
         51.5136,
     )
+
+
+async def test_city_context_carries_the_calendar():
+    s, http = store(Server())
+    async with http:
+        city = await s.city("london")
+    (eid,) = city.calendar
+    assert (eid.name, eid.aliases, eid.first, eid.last, eid.estimate) == (
+        "Eid al-Fitr",
+        ("Eid",),
+        date(2027, 3, 9),
+        date(2027, 3, 10),
+        True,
+    )
+    assert city.find_date("eid", date(2027, 3, 10)) == eid
+    assert city.find_date("eid", date(2027, 3, 11)) is None
+
+
+async def test_a_context_without_a_calendar_has_none():
+    # understand_context from 011, before 019 is applied.
+    server = Server()
+    server.context = {k: v for k, v in CONTEXT.items() if k != "calendar"}
+    s, http = store(server)
+    async with http:
+        assert (await s.city("london")).calendar == ()
 
 
 async def test_an_unknown_city_is_an_error():

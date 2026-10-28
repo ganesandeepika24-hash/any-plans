@@ -1,6 +1,7 @@
 """Code, not the model, turns intent into filters: dates, places, prices (principle 5)."""
 
 from datetime import datetime
+from itertools import pairwise
 
 import pytest
 
@@ -143,6 +144,133 @@ def test_an_impossible_date_drops_dates_and_says_so():
     )
     assert r.filters.date_from is None and r.filters.categories == ["Music"]
     assert [n.code for n in r.notes] == ["no_such_date"]
+
+
+# Calendar (decision 0019) ----------------------------------------------------------
+
+
+def event_window(event, now=WED_EVENING, **fields):
+    r = resolve(understood(event=event, **fields), now, CITY)
+    f = r.filters
+    got = None if f.date_from is None else (f.date_from.isoformat(), f.date_to.isoformat())
+    return got, r.missing, [n.code for n in r.notes]
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        ("Remembrance Sunday", ("2026-11-08T05:00:00+00:00", "2026-11-09T05:00:00+00:00")),
+        ("Hanukkah", ("2026-12-04T05:00:00+00:00", "2026-12-13T05:00:00+00:00")),
+        ("Chanukah", ("2026-12-04T05:00:00+00:00", "2026-12-13T05:00:00+00:00")),
+        ("mothering sunday", ("2027-03-07T05:00:00+00:00", "2027-03-08T05:00:00+00:00")),
+        ("Feb half term", ("2027-02-15T05:00:00+00:00", "2027-02-20T05:00:00+00:00")),
+        ("Vaisakhi", ("2027-04-14T05:00:00+01:00", "2027-04-15T05:00:00+01:00")),
+        ("Chelsea Flower Show", ("2027-05-18T05:00:00+01:00", "2027-05-23T05:00:00+01:00")),
+    ],
+)
+def test_a_named_event_takes_its_whole_days_from_the_calendar(event, expected):
+    assert event_window(event) == (expected, (), [])
+
+
+def test_an_estimated_date_is_used_and_says_so():
+    # "Eid" is whichever Eid comes next: Eid al-Fitr, 9 or 10 March depending on the moon.
+    assert event_window("Eid") == (
+        ("2027-03-09T05:00:00+00:00", "2027-03-11T05:00:00+00:00"),
+        (),
+        ["estimated_date"],
+    )
+
+
+def test_a_bare_half_term_is_the_one_now_or_the_next():
+    # During October half-term it's the rest of this one; after it, February's.
+    assert event_window("half-term")[0] == (
+        "2026-10-28T20:00:00+00:00",
+        "2026-10-31T05:00:00+00:00",
+    )
+    after = datetime.fromisoformat("2026-11-02T12:00:00+00:00")
+    assert event_window("half-term", after)[0] == (
+        "2027-02-15T05:00:00+00:00",
+        "2027-02-20T05:00:00+00:00",
+    )
+
+
+def test_an_event_still_counts_until_5am_the_next_day():
+    late = datetime.fromisoformat("2026-11-09T02:00:00+00:00")
+    assert event_window("Remembrance Sunday", late)[0] == (
+        "2026-11-09T02:00:00+00:00",
+        "2026-11-09T05:00:00+00:00",
+    )
+
+
+def test_a_weekday_with_an_event_is_that_day_of_it():
+    # "Diwali on Sunday": the weekday agrees with the calendar's day (festival doc).
+    assert event_window("Diwali", when=when("weekday", "sun"))[0] == (
+        "2026-11-08T05:00:00+00:00",
+        "2026-11-09T05:00:00+00:00",
+    )
+    assert event_window("Hanukkah", when=when("weekday", "wed"))[0] == (
+        "2026-12-09T05:00:00+00:00",
+        "2026-12-10T05:00:00+00:00",
+    )
+
+
+def test_a_weekday_in_an_event_under_way_is_one_still_to_come():
+    # Wednesday evening of October half-term: Thursday is to come, Tuesday has gone.
+    assert event_window("half-term", when=when("weekday", "thu"))[0] == (
+        "2026-10-29T05:00:00+00:00",
+        "2026-10-30T05:00:00+00:00",
+    )
+    assert event_window("half-term", when=when("weekday", "tue")) == (None, ("date",), [])
+
+
+@pytest.mark.parametrize(
+    ("event", "weekday"),
+    [("Diwali", "sat"), ("Hanukkah", "sat")],  # not one of its days; two of its days
+)
+def test_a_weekday_that_does_not_pick_one_day_of_the_event_asks_for_a_date(event, weekday):
+    assert event_window(event, when=when("weekday", weekday)) == (None, ("date",), [])
+
+
+@pytest.mark.parametrize(
+    ("event", "fields"),
+    [
+        ("Pride in London", {}),
+        ("Notting Hill Carnival", {"when": when("weekday", "sun")}),  # row 57
+        ("Diwal", {}),  # part of a name is no match
+    ],
+)
+def test_an_event_the_calendar_does_not_have_asks_for_its_date(event, fields):
+    assert event_window(event, **fields) == (None, ("event_date",), [])
+
+
+def test_an_event_that_has_ended_asks_for_its_date():
+    # Diwali 2026 is over and 2027's isn't in the calendar yet.
+    after = datetime.fromisoformat("2026-11-10T12:00:00+00:00")
+    assert event_window("Diwali", after) == (None, ("event_date",), [])
+
+
+def test_a_date_given_with_an_event_wins_over_the_calendar():
+    assert event_window("Diwali", when=when("date", month=11, day=7))[0] == (
+        "2026-11-07T05:00:00+00:00",
+        "2026-11-08T05:00:00+00:00",
+    )
+
+
+def test_occurrences_that_share_a_name_never_overlap():
+    # "half-term" names three entries; the next one must be a single answer.
+    by_name: dict[str, list] = {}
+    for d in CITY.calendar:
+        for name in {normalise(n) for n in (d.name, *d.aliases)}:
+            by_name.setdefault(name, []).append(d)
+    for name, ds in by_name.items():
+        ds.sort(key=lambda d: d.first)
+        assert all(a.last < b.first for a, b in pairwise(ds)), name
+
+
+def test_calendar_seed_parsing_matches_the_database_shape():
+    assert len(CITY.calendar) == 12
+    assert all(d.first <= d.last for d in CITY.calendar)
+    assert [d.id for d in CITY.calendar if d.estimate] == ["london-2027-eid-al-fitr"]
 
 
 # Places ----------------------------------------------------------------------------

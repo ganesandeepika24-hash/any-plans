@@ -192,3 +192,10 @@ Groq's page says its table shows the Developer plan's base limits. The free tier
 - **Model-only scoring** compares `price_change` within budget and `distance_change` within radius.
 - **Ceiling with a perfect model:** end to end 49/73 (67.1%), model only 73/73. The set now runs all 73 rows.
 
+
+## Calendar (28 Oct 2026, decision 0019)
+
+- **Row 48** ("Things for kids in February half-term in Greenwich"): the hand-written reply now names `event: "February half-term"` with nothing unclear, as prompt v5 asks. The expected window is unchanged (15 to 19 February).
+- **Rows 34 and 57:** notes updated. Row 34 resolves from the calendar. Row 57 asks for `event_date` because the 2027 Carnival date isn't confirmed, so the calendar leaves it out.
+- **No new rows.** The festival doc's "Diwali on Sunday 8 November" is a resolver test instead, so the set stays at 73 and the baseline comparison stays fair.
+- **Ceiling with a perfect model:** end to end 53/73 (72.6%), model only 73/73. Rows 47, 48, 49 and 57 pass. Rows 34, 42, 46, 52, 53 and 55 now fail only on area.

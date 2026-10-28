@@ -1,25 +1,26 @@
 """Shared test helpers for the Understand node. No network: everything here is local.
 
-The city comes from db/seed/areas.sql and the config from the migrations (models from
-011, the active prompt from 013), so tests run against what ships, not a hand-made copy.
+The city comes from db/seed/areas.sql and db/seed/calendar.sql and the config from the
+migrations, so tests run against what ships, not a hand-made copy.
 """
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.understand.llm import Completion, LLMError, ProviderConfig, Usage
-from app.understand.resolve import Area, City
+from app.understand.resolve import Area, CalendarDate, City
 from app.understand.store import ConfigEntry
 from app.understand.tracing import NullTracer, Trace
 
 REPO = Path(__file__).resolve().parents[2]
 MIGRATION_014 = REPO / "db" / "migrations" / "014_llm_understand_v2.sql"
 MIGRATION_016 = REPO / "db" / "migrations" / "016_search_and_usage.sql"
-MIGRATION_017 = REPO / "db" / "migrations" / "017_near_me_prompt.sql"
 MIGRATION_018 = REPO / "db" / "migrations" / "018_refine.sql"
+MIGRATION_019 = REPO / "db" / "migrations" / "019_calendar.sql"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _QUOTED = r"'((?:[^']|'')*)'"
@@ -27,6 +28,10 @@ _AREA_ROW = re.compile(
     rf"^\s*\({_QUOTED}, {_QUOTED}, '(borough|neighbourhood)', "
     r"(array\[.*?\]::text\[\]|'\{\}'::text\[\]), "
     r"'SRID=4326;POINT\(([-\d.]+) ([-\d.]+)\)', ([\d.]+)\)"
+)
+_CALENDAR_ROW = re.compile(
+    rf"^\s*\({_QUOTED}, {_QUOTED}, (array\[.*?\]::text\[\]|'\{{\}}'::text\[\]), {_QUOTED}, "
+    rf"'([\d-]+)', '([\d-]+)', (true|false), "
 )
 
 
@@ -56,20 +61,49 @@ def seed_areas() -> tuple[Area, ...]:
     return tuple(areas)
 
 
+def seed_calendar() -> tuple[CalendarDate, ...]:
+    dates = []
+    for line in (REPO / "db" / "seed" / "calendar.sql").read_text().splitlines():
+        m = _CALENDAR_ROW.match(line)
+        if not m:
+            continue
+        date_id, name, aliases, _kind, first, last, estimate = m.groups()
+        dates.append(
+            CalendarDate(
+                id=_unquote(date_id),
+                name=_unquote(name),
+                aliases=()
+                if aliases.startswith("'{}'")
+                else tuple(_unquote(a) for a in re.findall(_QUOTED, aliases)),
+                first=date.fromisoformat(first),
+                last=date.fromisoformat(last),
+                estimate=estimate == "true",
+            )
+        )
+    return tuple(dates)
+
+
 def london() -> City:
-    return City(id="london", name="London", tz=ZoneInfo("Europe/London"), areas=seed_areas())
+    return City(
+        id="london",
+        name="London",
+        tz=ZoneInfo("Europe/London"),
+        areas=seed_areas(),
+        calendar=seed_calendar(),
+    )
 
 
 def migration_config() -> dict[str, Any]:
     """The active config the migrations ship: llm_understand v2 from 014,
-    understand_prompt v4 from 017, provider_limits v1 from 016, and refine_prompt and
-    refine_steps v1 from 018."""
+    provider_limits v1 from 016, refine_steps v1 from 018, and understand_prompt v5 and
+    refine_prompt v2 from 019."""
     llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_014.read_text(), re.S).group(1)
-    prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", MIGRATION_017.read_text(), re.S).group(1)
     limits = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_016.read_text(), re.S).group(1)
-    refine = MIGRATION_018.read_text()
-    refine_prompt = re.search(r"\$prompt\$(.*?)\$prompt\$", refine, re.S).group(1)
-    steps = re.search(r"values \('refine_steps', 1, '(.*?)'", refine, re.S).group(1)
+    steps = re.search(
+        r"values \('refine_steps', 1, '(.*?)'", MIGRATION_018.read_text(), re.S
+    ).group(1)
+    prompts = re.findall(r"\$prompt\$(.*?)\$prompt\$", MIGRATION_019.read_text(), re.S)
+    prompt, refine_prompt = prompts
     return {
         "llm_understand": json.loads(llm),
         "understand_prompt": {"system": prompt},
