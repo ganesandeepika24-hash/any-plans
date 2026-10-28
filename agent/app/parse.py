@@ -94,9 +94,9 @@ class ParseResponse(BaseModel):
     query_id: UUID
     filters: dict[str, Any] | None = None  # search_items' jsonb argument
     vibe: str | None = None  # beside the filters: search_items doesn't take them yet (0015)
+    who: str | None = None
     # Where filters' lat and lon came from, when they're the user's own point (0017).
     location_source: LocationSource | None = None
-    who: str | None = None
     embedding_text: str | None = None
     notes: list[NoteOut] = []
     missing: list[str] = []  # set when status is needs_clarification
