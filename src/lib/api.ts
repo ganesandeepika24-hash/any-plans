@@ -114,6 +114,11 @@ export function aiRefine(query_id: string, message: string, location?: Location 
   return postAgent<SearchResponse>("/refine", body);
 }
 
+// Only the explicit follow-up field supplies a successful query ID.
+export function submitAi(query: string, successfulQueryId?: string | null) {
+  return successfulQueryId ? aiRefine(successfulQueryId, query) : aiSearch(query);
+}
+
 // Filter-only search (docs/api.md section 13). Not an agent call.
 export async function filterSearch(filters: SearchFilters): Promise<ResultCard[]> {
   if (!supabase) throw new Error("Search isn't set up yet");
