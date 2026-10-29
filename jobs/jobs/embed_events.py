@@ -6,7 +6,8 @@ Each event's text is its title, category, genre, venue name and description. The
 stores the sha256 of the model name and that text in embedding_hash, so a run embeds
 only events whose text, or the model, changed since they were last embedded. Only
 events users can see are embedded: active, and not a duplicate. Writes go in batches,
-each committed on its own, so a failed run keeps the batches before it.
+each one statement committed on its own, so a failed run keeps the batches before it.
+Each batch logs its progress to stderr, so a slow run shows how far it got.
 
 The ingest job runs this after dedupe. Run it alone to backfill. A dry run is read-only,
 counts what it would embed and prints a few texts; it never loads the model.
@@ -89,11 +90,20 @@ def run(
             for start in range(0, len(pending), batch_size):
                 batch = pending[start : start + batch_size]
                 vectors = embedder([text for _, text, _ in batch])
+                for vector in vectors:
+                    if len(vector) != DIMENSIONS:
+                        raise ValueError(f"expected {DIMENSIONS} dimensions, got {len(vector)}")
+                rows = [
+                    (event_id, vector, digest)
+                    for (event_id, _, digest), vector in zip(batch, vectors, strict=True)
+                ]
                 with db.conn.transaction():
-                    for (event_id, _, digest), vector in zip(batch, vectors, strict=True):
-                        if len(vector) != DIMENSIONS:
-                            raise ValueError(f"expected {DIMENSIONS} dimensions, got {len(vector)}")
-                        db.set_embedding(event_id, vector, digest)
+                    db.set_embeddings(rows)
+                print(
+                    f"embed_events: {start + len(batch)} of {len(pending)} written",
+                    file=sys.stderr,
+                    flush=True,
+                )
         finished = True
         return summary
     except BaseException:

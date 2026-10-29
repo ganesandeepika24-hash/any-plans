@@ -2,6 +2,12 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-29: Skiddle nightly cancelled at 30 minutes (0009 change)
+
+- **One round trip per row.** The embedding job written for 0009 updated each event in its own statement. The tests ran against a local database, where a round trip costs nothing, so 5,000 of them looked free. Over the session pooler they took most of the run. Each batch is now one statement, and a test fails if a batch is written row by row.
+- **Logs that couldn't answer the question.** Python buffers stdout when it isn't a terminal, so the job's whole output arrived at exit with one timestamp. The workflow now sets `PYTHONUNBUFFERED=1`.
+- **A suspected cause that wasn't it.** The model cache and the hash check were both checked first. The cache held the model (83 MB), and Skiddle's text is stable, so neither caused the slowdown. The re-embed was the one-off from 009.
+
 ## 2026-10-29: fixed-date days in the calendar (0019 update)
 
 - **A requested date was wrong, and wasn't entered.** Mother's Day UK was asked for as 14 March 2027. The seed already had 7 March: the fourth Sunday of Lent, three weeks before Easter (28 March, from gov.uk's Good Friday). The Church of England's calendar confirms the rule. The row stays as it is, and the PR says why.

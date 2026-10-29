@@ -29,12 +29,16 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 60, not 30: an ingest that re-embeds every event (a model change, or the vectors
+    # from before 009) took longer than 30.
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: jobs
     env:
       FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.fastembed
+      # Print as it happens, so the log's timestamps show which phase was slow.
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v7
 
