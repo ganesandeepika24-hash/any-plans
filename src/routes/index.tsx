@@ -80,7 +80,9 @@ function Index() {
   }
 
   async function runAi(query: string, refineId?: string | null, given?: Location | null) {
-    if (!session) return setAuthOpen(true);
+    // Read the session fresh: the hook's copy can lag right after sign-in or on first load.
+    const current = session ?? (supabase ? (await supabase.auth.getSession()).data.session : null);
+    if (!current) return setAuthOpen(true);
     setBusy(true);
     setNotice(null);
     setAiResting(false);
