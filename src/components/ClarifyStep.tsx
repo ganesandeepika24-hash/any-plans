@@ -13,7 +13,7 @@ export function ClarifyStep({
 }: {
   questions: Question[];
   onAnswer: (text: string) => void;
-  onUseLocation?: () => void;
+  onUseLocation?: (() => void) | undefined;
   locationDenied?: boolean;
   busy: boolean;
 }) {
@@ -35,7 +35,7 @@ function QuestionBlock({
 }: {
   q: Question;
   onAnswer: (t: string) => void;
-  onUseLocation?: () => void;
+  onUseLocation?: (() => void) | undefined;
   locationDenied: boolean;
   busy: boolean;
 }) {
