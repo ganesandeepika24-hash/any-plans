@@ -1,5 +1,6 @@
 import { BadgeCheck, ExternalLink, Info } from "lucide-react";
 import type { ResultCard } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 const when = (iso: string) =>
@@ -40,7 +41,15 @@ export function ResultCardView({ r }: { r: ResultCard }) {
           {r.category && <Badge variant="secondary">{r.category}</Badge>}
           {r.genre && <span>{r.genre}</span>}
         </div>
-        <h3 className="mt-1 font-semibold text-card-foreground">{r.title}</h3>
+        <h3 className="mt-1 font-semibold text-card-foreground">
+          {r.url ? (
+            <a href={r.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary hover:underline">
+              {r.title}
+            </a>
+          ) : (
+            r.title
+          )}
+        </h3>
         <p className="text-sm text-muted-foreground">
           {when(r.start_at)}
           {r.venue_name && ` · ${r.venue_name}`}
@@ -57,12 +66,14 @@ export function ResultCardView({ r }: { r: ResultCard }) {
             {r.confidence_label}
           </span>
           <span className="text-muted-foreground">{checked(r.last_checked_at)}</span>
-          {r.url && (
-            <a href={r.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary underline">
-              Book <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
         </div>
+        {r.url && (
+          <Button asChild size="sm" className="mt-3 rounded-full">
+            <a href={r.url} target="_blank" rel="noopener noreferrer">
+              Book now <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          </Button>
+        )}
       </div>
     </article>
   );
