@@ -50,12 +50,12 @@ describe("Signed-in resting notice flow (simulated session)", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
-  it("enters resting only for unreachable requests, then recovers on success", async () => {
+  it("does not show resting when the request fails to reach the agent", async () => {
     mocks.submitAi.mockRejectedValueOnce(new AgentError(null, "Unreachable"))
       .mockResolvedValueOnce({ status: "ok", query_id: "recovered-query", filters: {}, results: [], notes: [], location_source: null });
     renderPage();
     await search();
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(document.getElementById("ai-resting")).toBeNull();
     await search();
     expect(document.getElementById("ai-resting")).toBeNull();
     expect(screen.getByRole("textbox", { name: "Follow-up" })).toBeInTheDocument();

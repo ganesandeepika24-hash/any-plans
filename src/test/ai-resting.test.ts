@@ -4,8 +4,8 @@ vi.mock("@/lib/supabase", () => ({ supabase: null }));
 import { AgentError, isAiResting } from "@/lib/api";
 
 describe("AI resting conditions", () => {
-  it("shows resting when a request cannot reach the agent", () => {
-    expect(isAiResting(new AgentError(null, "Unreachable"))).toBe(true);
+  it("does not show resting when a request cannot reach the agent", () => {
+    expect(isAiResting(new AgentError(null, "Unreachable"))).toBe(false);
   });
 
   it("shows resting when the daily limit reply arrives", () => {
