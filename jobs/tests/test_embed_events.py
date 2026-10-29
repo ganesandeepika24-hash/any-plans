@@ -7,10 +7,11 @@ autouse no_model_download fixture fails any test that would load the real model.
 import copy
 import re
 
+import httpx
 import psycopg
 import pytest
 
-from jobs import embed_events, embeddings
+from jobs import embed_events, embeddings, ingest
 from jobs.db import Database
 from jobs.normalise import DESCRIPTION_LIMIT, Event, clean_description
 from jobs.sources import skiddle, ticketmaster
@@ -303,7 +304,7 @@ def test_a_read_only_connection_cannot_write_embeddings(db_url, events):
     read_only = Database.connect(db_url, read_only=True)
     try:
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
-            read_only.set_embedding(events["quiz"], [0.1] * 384, "a" * 64)
+            read_only.set_embeddings([(events["quiz"], [0.1] * 384, "a" * 64)])
     finally:
         read_only.close()
 
@@ -322,3 +323,68 @@ def test_ingest_stores_the_description_and_keeps_the_vector_on_reingest(db, sql)
     embed(db, embedder)
     assert embedder.calls == []
     assert sql("select embedding_hash from events where description = 'Two sets.'") == before
+
+
+def run_skiddle(db):
+    page = fixture("skiddle/events-page.json")  # trimmed real events
+    return ingest.run(
+        "skiddle",
+        db,
+        httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=page))),
+        "KEY",
+        now=NOW,
+        dry_run=False,
+        sleep=lambda s: None,
+    )
+
+
+@pytest.mark.db
+def test_a_nightly_skiddle_reingest_re_embeds_nothing(db, sql):
+    # The nightly run upserts every Skiddle event again. Their text hasn't changed, so
+    # none of them reaches the embedder and no vector is rewritten.
+    run_skiddle(db)
+    visible = embed(db).counts.new
+    assert visible > 0
+    before = sql("select id, embedding_hash from events where source = 'skiddle' order by id")
+
+    run_skiddle(db)
+    embedder = FakeEmbedder()
+    summary = embed(db, embedder)
+    assert embedder.calls == []
+    assert (summary.counts.new, summary.counts.updated, summary.unchanged) == (0, 0, visible)
+    assert sql("select id, embedding_hash from events where source = 'skiddle' order by id") == (
+        before
+    )
+
+
+@pytest.mark.db
+def test_each_batch_is_one_write(db, sql, events, monkeypatch):
+    # One round trip per batch, not per row: per-row updates over the pooler made the
+    # re-embed after 009 outlast the 30-minute workflow limit.
+    writes = []
+    set_embeddings = db.set_embeddings
+
+    def counted(rows):
+        writes.append(len(rows))
+        return set_embeddings(rows)
+
+    monkeypatch.setattr(db, "set_embeddings", counted)
+    embed(db, batch_size=2)
+    assert writes == [2, 1]
+    assert sql("select count(*) from events where embedding_hash is not null") == [(3,)]
+
+
+@pytest.mark.db
+def test_set_embeddings_writes_each_rows_own_vector_and_hash(db, sql, events):
+    rows = [
+        (events["quiz"], [0.25] * 384, "a" * 64),
+        (events["play"], [-0.5] * 384, "b" * 64),
+    ]
+    with db.conn.transaction():
+        assert db.set_embeddings(rows) == 2
+    assert db.set_embeddings([]) == 0
+    stored = sql(
+        "select source_id, (embedding::real[])[1], (embedding::real[])[384], embedding_hash"
+        " from events where embedding is not null order by source_id"
+    )
+    assert stored == [("play", -0.5, -0.5, "b" * 64), ("quiz", 0.25, 0.25, "a" * 64)]

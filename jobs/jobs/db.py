@@ -667,16 +667,25 @@ class Database:
             deleted, kept = cur.fetchone()
             return deleted, kept
 
-    def set_embedding(self, event_id: UUID, vector: list[float], text_hash: str) -> None:
+    def set_embeddings(self, rows: list[tuple[UUID, list[float], str]]) -> int:
+        """Write (event id, vector, text hash) rows in one statement, so a batch is one
+        round trip to the pooler rather than one per row. Returns the rows updated."""
+        if not rows:
+            return 0
+        ids, vectors, hashes = zip(*rows, strict=True)
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                update public.events
-                   set embedding = %s::extensions.vector, embedding_hash = %s
-                 where id = %s
+                update public.events e
+                   set embedding = v.embedding::extensions.vector,
+                       embedding_hash = v.embedding_hash
+                  from unnest(%s::uuid[], %s::text[], %s::text[])
+                       as v(id, embedding, embedding_hash)
+                 where e.id = v.id
                 """,
-                (_vector(vector), text_hash, event_id),
+                (list(ids), [_vector(v) for v in vectors], list(hashes)),
             )
+            return cur.rowcount
 
 
 def _point(lat: float | None, lon: float | None) -> str | None:

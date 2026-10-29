@@ -223,6 +223,13 @@ def test_osm_scheduled_write_check_catches_a_dry_run_default(tmp_path):
     assert osm_ingest_args(broken, {}, tmp_path) == ["--dry-run"]
 
 
+def test_skiddle_ingest_has_an_hour():
+    # A run that re-embeds every event outlasted 30 minutes (runs 7 and 8).
+    job = yaml.safe_load(SKIDDLE_WORKFLOW.read_text())["jobs"]["ingest"]
+    assert job["timeout-minutes"] == 60
+    assert job["env"]["PYTHONUNBUFFERED"] == "1"
+
+
 EMBED_WORKFLOW = WORKFLOWS / "embed-events.yml"
 
 

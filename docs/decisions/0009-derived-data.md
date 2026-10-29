@@ -246,7 +246,7 @@ Step 1.1 already embedded events inside `ingest.run()`, with the text `title · 
 - **Selection:** only events users can see, `status = 'active'` and `duplicate_of is null`. The service role bypasses `events_public_read`, so the query filters both itself.
   - An event that stops being a duplicate, or is restored from cancelled, has a missing or stale hash and is embedded on the next run.
 - **Writes:**
-  - Batches of 256, each committed on its own, so a failed run keeps the batches before it.
+  - Batches of 256, each written by one `update … from unnest(…)` statement and committed on its own, so a failed run keeps the batches before it. (Until 29 Oct 2026 each row was its own update; see "Changes".)
   - Vectors are checked as 384 long before they're written.
   - The ingest upsert no longer clears `embedding`. A changed event keeps its old vector until the embedding step replaces it.
 - **Job:** `python -m jobs.embed_events [--dry-run]`.
@@ -301,3 +301,8 @@ Step 1.1 already embedded events inside `ingest.run()`, with the text `title · 
 - **Deliberate breaks:** 15 in the job and 3 in migration 009 all fail the suite. The migration breaks were each applied to a fresh database.
 - **To record after the first scheduled run:** the `embed_events` row's `fetched`, `new` and `duration_ms` for the one-off re-embed, then a normal night's figures.
 - **Supabase:** apply 009 **before** merging. The nightly Skiddle ingest writes `events.description` and `embedding_hash`, so it fails without them. The migration only adds columns, so today's code runs unchanged on a database that has it. Apply it in the SQL editor with its checksum update in the same run (0006).
+
+## Changes
+
+- **29 Oct 2026: one statement per batch, and an hour for the Skiddle workflow.** Nightly Skiddle runs 7 and 8 were cancelled at the 30-minute limit, with the `embed_events` row's `duration_ms` still null. The model came from the Actions cache and fastembed batched the texts. The hash check was skipping what it should: Skiddle's text is title, category and venue, which is the same every night. But run 6 embedded 4,985 events with the code from before 009, with no hash, so runs 7 and 8 each had about 5,000 rows to re-embed, the one-off case this decision expects. Each row was its own `update` to the session pooler, so the writes took one round trip per row, after an ingest that already writes row by row. The fix writes each batch in one statement, which is 20 round trips instead of about 5,000. `ingest-skiddle.yml` now has `timeout-minutes: 60` and `PYTHONUNBUFFERED=1`. The job's output had been buffered until exit, so every log line carried the same timestamp and the logs couldn't show which phase was slow. Each batch now logs its progress to stderr.
+  - To record after the next scheduled run: the `embed_events` row's `duration_ms`, and the ingest row's, from the timestamped log.
