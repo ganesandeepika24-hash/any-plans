@@ -67,3 +67,19 @@ The location already reached the resolver as a point with no source. 0013 kept i
   - v3 left active (db test)
 - **Ceiling with a perfect model:** unchanged at 47/71.
 - **Eval:** not run (Groq's daily limit, owner's hold).
+
+## Update 2026-10-29: the app reads the location before the first call (step 1.4)
+
+- **Why:** under the flow first written into `docs/api.md`, a near-me search cost two AI searches against the daily cap of 10. The app sent the query, got `missing: ["location"]` back, read the position and sent the query again. The near-me decision (`claude/near-me-decision-1.6.md`) has the device location read once with permission. The owner chose (29 Oct 2026) to read it before the first call.
+- **What changed:**
+  - **The app spots near me itself.** It checks the text for the near-me phrases the prompt uses (v6: "near me", "nearby", "nearby me", "around me", "around here") and reads the position first. Then it sends the search once with `location.source: "device"`.
+  - **Refused or failed:** with permission refused, an error or the 8-second timeout, it sends without a location. The agent asks where, as row 62 expects, and the two-call path stays as the fallback.
+  - **No agent or database change.** The agent already accepted a device location from the first call. The field is `location.source`; `location_source` is the reply's, and a top-level one in a request is refused with 422.
+  - **`docs/api.md` section 8** is the contract, with the phrase list. `agent/tests/test_near_me_phrases.py` fails when that list differs from the active prompt's, so a prompt change updates the doc, then the app.
+  - The front end is Lovable's, through a prompt the owner sends.
+- **Tests:** 711 agent tests pass, 5 of them new:
+  - three drift tests: the list, the version it names, and a later prompt taking over
+  - the route test: "something near me tonight" with a device location gives one model call, missing only `category`, `location_source` `"device"`, no search, and the point not logged
+  - a top-level `location_source` refused
+- **Deliberate breaks:** 3, all caught: a phrase dropped from the doc, a v7 prompt adding "close by", and the resolver ignoring the device location.
+- **Still open:** the permission-refused path in a real browser (option 2, deferred by the owner).

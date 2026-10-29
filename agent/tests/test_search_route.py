@@ -296,6 +296,37 @@ def test_a_month_of_weekends_comes_back_as_five_windows(signing_key, token):
     assert len(body["filters"]["windows"]) == 5  # Fridays 1, 8, 15, 22 and 29 Jan 2027
 
 
+def test_near_me_with_the_device_location_first_is_one_ai_search(signing_key, token):
+    # The app reads the position before the first call (decision 0017 update, step 1.4):
+    # row 61's search, sent once, asks only for a category and never where.
+    something = reply(
+        keywords="something", near_me=True, when=when("tonight"), unclear=["category"]
+    )
+    h = Harness(signing_key, llm=FakeLLM(groq=[something], cloudflare=[]))
+    loc = WATERLOO | {"source": "device"}
+    body = h.post({"query": "something near me tonight", "location": loc}, token).json()
+    assert (body["status"], body["missing"]) == ("needs_clarification", ["category"])
+    assert body["location_source"] == "device"
+    assert (body["filters"]["lat"], body["filters"]["lon"]) == (WATERLOO["lat"], WATERLOO["lon"])
+    assert [q["reason"] for q in body["questions"]] == ["category"]
+    assert len(h.llm.calls) == 1  # one model call: one AI search against the cap
+    assert h.backend.calls == []  # a question never searches
+    (row,) = h.log.rows
+    assert row["status"] == "needs_clarification"
+    logged = json.dumps(h.log.rows)
+    assert "device" not in logged and str(WATERLOO["lat"]) not in logged
+
+
+def test_the_device_location_goes_in_location_source_not_beside_it(signing_key, token):
+    # A top-level location_source is the reply's field, not the request's: refused.
+    h = Harness(signing_key)
+    body = {"query": "jazz near me", "location": WATERLOO, "location_source": "device"}
+    r = h.post(body, token)
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["body", "location_source"]
+    assert h.llm.calls == [] and h.log.rows == []
+
+
 def test_search_returns_the_device_source(signing_key, token):
     h = Harness(signing_key, llm=FakeLLM(groq=[NEAR_ME], cloudflare=[]))
     loc = WATERLOO | {"source": "device"}
