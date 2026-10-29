@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Keep sign-in calls in a browser-safe helper and agent requests in the API module; explicit follow-ups use the latest successful query ID so new searches and refinements cannot be confused.

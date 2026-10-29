@@ -1,14 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthDialog } from "@/components/AuthDialog";
 import { ClarifyStep } from "@/components/ClarifyStep";
 import { FilterPanel } from "@/components/FilterPanel";
 import { ResultCardView } from "@/components/ResultCardView";
 import { useAuth } from "@/hooks/useAuth";
-import { AgentError, aiSearch, filterSearch, type ResultCard, type SearchResponse } from "@/lib/api";
+import { AgentError, submitAi, filterSearch, type ResultCard, type SearchResponse } from "@/lib/api";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
 import {
   filtersFromUrl,
@@ -46,6 +46,9 @@ function Index() {
   const [reply, setReply] = useState<SearchResponse | null>(null);
   const [aiResults, setAiResults] = useState<ResultCard[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [aiResting, setAiResting] = useState(false);
+  const [followUp, setFollowUp] = useState("");
+  const [successfulQueryId, setSuccessfulQueryId] = useState<string | null>(null);
 
   const urlFilters = useMemo(() => filtersFromUrl(params), [params]);
   const searched = hasAnyFilter(params);
@@ -63,20 +66,24 @@ function Index() {
     navigate({ search: { ...(q ? { q } : {}), ...filtersToUrl(f, { personalPoint }) } });
   }
 
-  async function runAi(query: string) {
+  async function runAi(query: string, refineId?: string | null) {
     if (!session) return setAuthOpen(true);
     setBusy(true);
     setNotice(null);
+    setAiResting(false);
     try {
-      const r = await aiSearch(query);
+      const r = await submitAi(query, refineId);
       setReply(r);
       if (r.status === "ok" && r.filters) {
-        showFilters(r.filters, originalQuery || query, r.location_source !== null);
+        setSuccessfulQueryId(r.query_id);
+        setFollowUp("");
+        showFilters(r.filters, refineId ? originalQuery : query, r.location_source !== null);
         setAiResults(r.results); // null means the search step failed: filter search runs instead
         if (!r.results && r.message) setNotice(r.message);
       } else if (r.status === "ai_resting") {
+        setAiResting(true);
+        setSuccessfulQueryId(null);
         setAiResults(null);
-        setNotice(r.message);
         if (!searched) showFilters({});
       }
     } catch (e) {
@@ -86,7 +93,8 @@ function Index() {
         setNotice("Please sign in again to use AI search.");
         setAuthOpen(true);
       } else {
-        setNotice("AI search isn't available right now; filters still work.");
+        setAiResting(true);
+        setSuccessfulQueryId(null);
         if (!searched) showFilters({});
       }
     } finally {
@@ -99,6 +107,8 @@ function Index() {
     const q = text.trim();
     if (!q) return;
     setOriginalQuery(q);
+    setSuccessfulQueryId(null);
+    setAiResults(null);
     runAi(q);
   }
 
@@ -117,7 +127,7 @@ function Index() {
   return (
     <main className="min-h-screen bg-background px-4 pb-16">
       <header className="mx-auto flex max-w-6xl items-center justify-between py-4">
-        <button className="font-display text-2xl text-foreground" onClick={() => { setReply(null); setAiResults(null); navigate({ search: {} }); }}>
+        <button className="font-display text-2xl text-foreground" onClick={() => { setReply(null); setAiResults(null); setSuccessfulQueryId(null); setAiResting(false); navigate({ search: {} }); }}>
           Any Plans?
         </button>
         {ready && supabaseConfigured && (
@@ -146,10 +156,13 @@ function Index() {
               className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
               aria-label="Search"
             />
-            <Button type="submit" size="sm" className="rounded-full" disabled={busy || !text.trim()}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="submit" size="sm" className="rounded-full" disabled={busy || !text.trim()} aria-describedby={aiResting ? "ai-resting" : undefined}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />} AI search
+              </Button>
+            </div>
           </label>
+          {aiResting && <p id="ai-resting" role="status" className="mt-2 text-right text-sm text-muted-foreground">AI search is resting. Filters still work.</p>}
         </form>
         {!supabaseConfigured && (
           <p className="mt-4 text-sm text-destructive">Search isn't connected yet: the database settings are missing.</p>
@@ -168,6 +181,7 @@ function Index() {
             setReply(null);
             setAiResults(null);
             setNotice(null);
+            setSuccessfulQueryId(null);
             showFilters(f);
           }}
         />
@@ -187,6 +201,12 @@ function Index() {
             <p className="text-sm text-muted-foreground">Nothing matched. Try widening the dates or the distance.</p>
           )}
           {!clarifying && results?.map((r) => <ResultCardView key={r.id} r={r} />)}
+          {!clarifying && successfulQueryId && (
+            <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (followUp.trim()) runAi(followUp.trim(), successfulQueryId); }}>
+              <input className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm" aria-label="Follow-up" placeholder="Make it cheaper…" value={followUp} maxLength={500} onChange={(e) => setFollowUp(e.target.value)} />
+              <Button type="submit" disabled={busy || !followUp.trim()}><Sparkles className="h-4 w-4" aria-hidden="true" /> Refine</Button>
+            </form>
+          )}
           {!searched && !reply && !notice && (
             <p className="text-sm text-muted-foreground">Type what you fancy above, or pick some filters.</p>
           )}

@@ -7,8 +7,8 @@ const key = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] as string | undefin
 
 export const supabaseConfigured = Boolean(url && key);
 
-export const supabase: SupabaseClient | null = supabaseConfigured
-  ? createClient(url!, key!, {
+export const supabase: SupabaseClient | null = url && key
+  ? createClient(url, key, {
       auth: {
         persistSession: typeof window !== "undefined",
         autoRefreshToken: typeof window !== "undefined",
