@@ -532,6 +532,30 @@ export type Database = {
         }
         Relationships: []
       }
+      takedowns: {
+        Row: {
+          reference: string
+          removed_at: string
+          requested_at: string
+          source: string
+          source_id: string
+        }
+        Insert: {
+          reference: string
+          removed_at?: string
+          requested_at: string
+          source: string
+          source_id: string
+        }
+        Update: {
+          reference?: string
+          removed_at?: string
+          requested_at?: string
+          source?: string
+          source_id?: string
+        }
+        Relationships: []
+      }
       usage_daily: {
         Row: {
           calls: number | null
