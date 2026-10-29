@@ -40,6 +40,16 @@ export function FilterPanel({
     setMiles((value.radius_km ?? DEFAULT_AREA.radius_km) / KM_PER_MILE);
   }, [value]);
 
+  // Re-run the search shortly after the person changes a filter.
+  const [edits, setEdits] = useState(0);
+  const touched = () => setEdits((n) => n + 1);
+  useEffect(() => {
+    if (edits === 0) return;
+    const t = setTimeout(apply, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edits]);
+
   function apply() {
     const f: SearchFilters = {};
     const datesSame =
@@ -71,11 +81,11 @@ export function FilterPanel({
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
           <Label htmlFor="from">From</Label>
-          <Input id="from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <Input id="from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); touched(); }} />
         </div>
         <div className="space-y-1">
           <Label htmlFor="to">To</Label>
-          <Input id="to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <Input id="to" type="date" value={to} onChange={(e) => { setTo(e.target.value); touched(); }} />
         </div>
       </div>
       {value.windows?.length ? (
@@ -94,7 +104,7 @@ export function FilterPanel({
                 variant={on ? "default" : "outline"}
                 className="rounded-full"
                 aria-pressed={on}
-                onClick={() => setCats(on ? cats.filter((x) => x !== c) : [...cats, c])}
+                onClick={() => { setCats(on ? cats.filter((x) => x !== c) : [...cats, c]); touched(); }}
               >
                 {c}
               </Button>
@@ -105,20 +115,20 @@ export function FilterPanel({
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
           <Label htmlFor="pmin">Min £</Label>
-          <Input id="pmin" type="number" min={0} value={pmin} onChange={(e) => setPmin(e.target.value)} />
+          <Input id="pmin" type="number" min={0} value={pmin} onChange={(e) => { setPmin(e.target.value); touched(); }} />
         </div>
         <div className="space-y-1">
           <Label htmlFor="pmax">Max £</Label>
-          <Input id="pmax" type="number" min={0} value={pmax} onChange={(e) => setPmax(e.target.value)} />
+          <Input id="pmax" type="number" min={0} value={pmax} onChange={(e) => { setPmax(e.target.value); touched(); }} />
         </div>
       </div>
       <div className="flex items-center justify-between">
         <Label htmlFor="unpriced">Hide events with no price</Label>
-        <Switch id="unpriced" checked={hideUnpriced} onCheckedChange={setHideUnpriced} />
+        <Switch id="unpriced" checked={hideUnpriced} onCheckedChange={(v) => { setHideUnpriced(v); touched(); }} />
       </div>
       <div>
         <Label>Within {miles.toFixed(1)} miles</Label>
-        <Slider className="mt-3" min={0.5} max={62} step={0.5} value={[miles]} onValueChange={([m]) => m !== undefined && setMiles(m)} />
+        <Slider className="mt-3" min={0.5} max={62} step={0.5} value={[miles]} onValueChange={([m]) => { if (m !== undefined) { setMiles(m); touched(); } }} />
       </div>
       <Button className="w-full" onClick={apply}>
         Show events

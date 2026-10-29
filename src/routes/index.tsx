@@ -184,7 +184,7 @@ function Index() {
             setAiResults(null);
             setNotice(null);
             setSuccessfulQueryId(null);
-            showFilters(f);
+            showFilters(f, typeof params.q === "string" ? params.q : undefined);
           }}
         />
         <div className="space-y-4">
