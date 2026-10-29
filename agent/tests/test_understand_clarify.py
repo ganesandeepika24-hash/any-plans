@@ -117,7 +117,7 @@ def test_an_event_with_a_date_resolves():
     assert r.missing == () and days(r) == day("2026-11-07")
 
 
-# Budget and price basis (rules 4 and 5) -------------------------------------------
+# Budget and price basis (rules 4 and 5; party size in test_party_size.py) ---------
 
 
 def test_cheap_asks_for_a_budget():
@@ -131,9 +131,11 @@ def test_a_stated_price_beats_a_vague_word():
     assert r.missing == () and r.filters.price_max == 30
 
 
-def test_a_total_price_asks_whether_it_is_per_person():
+def test_a_total_price_with_no_party_size_asks_how_many():
+    # Decision 0024: the user said "total", so the question is for how many (was
+    # price_basis).
     r = run(price_max=60, price_scope="total")
-    assert r.missing == ("price_basis",) and r.filters.price_max is None
+    assert r.missing == ("party_size",) and r.filters.price_max is None
 
 
 @pytest.mark.parametrize("scope", ["each", None])
@@ -267,7 +269,15 @@ def test_an_unknown_place_is_a_note_not_a_question():
 def test_missing_reasons_come_in_the_fixed_order():
     r = run(near_me=True, unclear=["category", "budget", "date"], price_max=None, event="Pride")
     assert r.missing == ("location", "date", "budget", "category")
-    assert MISSING_ORDER == ("location", "date", "budget", "price_basis", "event_date", "category")
+    assert MISSING_ORDER == (
+        "location",
+        "date",
+        "budget",
+        "price_basis",
+        "party_size",
+        "event_date",
+        "category",
+    )
 
 
 # Questions --------------------------------------------------------------------------
@@ -316,9 +326,14 @@ def test_a_recurring_day_asks_which_dates_with_its_choices():
 
 def test_price_basis_and_event_date_questions():
     u = understood(keywords="christmas market", price_max=60, price_scope="total")
-    (q,) = questions(("price_basis",), u, CITY.name)
-    assert q.question == "Christmas market: is £60 per person or in total?"
-    assert q.choices == ("Per person", "In total")
+    (q,) = questions(("price_basis",), u, CITY.name, party_size=4)
+    assert q.question == "Is £60 for each person, or for all 4 of you?"
+    assert q.choices == ("Each person", "All 4 of us")
+    (q,) = questions(("price_basis",), u, CITY.name)  # no number: never "all None"
+    assert (q.question, q.choices) == (
+        "Is £60 for each person, or for all of you?",
+        ("Each person", "All of us"),
+    )
     u = understood(event="Pride in London")
     (q,) = questions(("event_date",), u, CITY.name)
     assert q.question == "I don't know the date for Pride in London. Can you give me a date?"

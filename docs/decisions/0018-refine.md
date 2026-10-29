@@ -80,3 +80,7 @@ Principle 5 applies: the model understands, and code computes. "Cheaper" has no 
   - Refining a `needs_clarification` query, whose test row had no filters.
 - **Ceiling with a perfect model:** end to end 49/73 (67.1%), model only 73/73. Rows 25 and 26 now run and pass.
 - **Eval:** not run (Groq's daily limit, owner's hold).
+
+## Changes
+
+- **2026-10-29: party size (decision 0024, migration 026).** The queries row also stores the stated budget (`budget`), and a refine reads it back. "It's 6 of us now" divides a stored total again; a new total uses the earlier party size; "cheaper" and "pricier" change the per-ticket cap, which then counts as per person. The per-ticket cap note is worked out from the refined filters, like the default-area note. `refine_prompt` v4.

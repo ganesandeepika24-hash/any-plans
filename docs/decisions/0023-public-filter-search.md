@@ -77,3 +77,7 @@ The same filters give the same rows, order, fields and labels on both paths. An 
 ## Update 2026-10-28: windows (migration 024)
 
 `search_items_public` no longer refuses `windows`. `search_items` applies them since 024 (decision 0020's update), and the wrapper passes `filters` through, so a URL's windows give the same results on both paths.
+
+## Changes
+
+- **2026-10-29: party size (decision 0024, migration 026).** `search_items`, and so this function, accepts `party_size` (1 to 1000) and checks it, but doesn't filter on it. The filter panel's budget is per ticket. The comparison test has an eleventh filter set, with a party size.

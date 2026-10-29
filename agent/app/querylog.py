@@ -80,7 +80,7 @@ class SupabaseQueryLog:
             response = await self._http.get(
                 self._url,
                 params={
-                    "select": "id,status,filters,embedding_text,vibe,who",
+                    "select": "id,status,filters,embedding_text,vibe,who,budget",
                     "id": f"eq.{query_id}",
                     "user_id": f"eq.{user_id}",
                 },

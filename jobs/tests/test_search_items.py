@@ -235,6 +235,20 @@ def test_prices(priced, search, filters, expected):
     assert set(titles(search(filters))) == expected
 
 
+@pytest.mark.parametrize("size", [1, 5, 1000])
+def test_party_size_changes_no_rows(priced, search, size):
+    # Decision 0024: prices are per ticket, so the agent has already divided any total.
+    # party_size rides along for the panel and the URL.
+    def rows(filters):
+        # Each call is its own transaction, so now() and the date score move a little.
+        return [
+            {k: v for k, v in r.items() if k not in ("called_at", "score")} for r in search(filters)
+        ]
+
+    for filters in ({}, {"price_max": 12}, {"price_min": 25, "price_max": 60}):
+        assert rows(filters | {"party_size": size}) == rows(filters)
+
+
 def test_radius_keeps_events_within_it_and_drops_those_without_a_location(add, search):
     lat, lon = CENTRE
     add("0.5 km", point=(lat + 0.5 * KM_LAT, lon))
@@ -422,6 +436,10 @@ def test_bad_weights_are_an_error(search, sql, weights):
         {"limit": 101},
         {"limit": 2.5},
         {"limit": "5"},
+        {"party_size": 0},
+        {"party_size": 1001},
+        {"party_size": 2.5},
+        {"party_size": "5"},
     ],
     ids=[
         "unknown key",
@@ -445,6 +463,10 @@ def test_bad_weights_are_an_error(search, sql, weights):
         "limit 101",
         "fractional limit",
         "limit as string",
+        "party of 0",
+        "party over 1000",
+        "fractional party",
+        "party as string",
     ],
 )
 def test_bad_filters_are_refused(search, filters):
@@ -736,10 +758,11 @@ def filter_sets(t0) -> list[dict]:
             "limit": 5,
         },
         {"include_unpriced": False},
+        {"price_max": 20, "party_size": 5},  # an AI search's filters, loaded into the panel
     ]
 
 
-@pytest.mark.parametrize("n", range(10))
+@pytest.mark.parametrize("n", range(11))
 def test_signed_out_search_gives_exactly_the_agents_results(db_url, mixed, n):
     # PRD F-01: the same filters give the same rows, order, fields and labels.
     filters = filter_sets(mixed)[n]

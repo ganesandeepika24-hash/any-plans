@@ -28,6 +28,7 @@ from app.understand.llm import LLMClient, LLMConfig, LLMError, schema_instructio
 from app.understand.refine import STEPS_KEY, Prior, RefineSteps, apply
 from app.understand.resolve import (
     DATE_RANGES_KEY,
+    Budget,
     City,
     DateRanges,
     LocationSource,
@@ -75,6 +76,7 @@ class UnderstandResult:
     vibe: str | None = None  # the search's, or for a refine the follow-up's or the earlier one's
     who: str | None = None
     understood: UnderstoodQuery | None = None  # the model's reply (a RefineReply for a refine)
+    budget: Budget | None = None  # the stated budget, stored for a later refine (0024)
     provider: str | None = None
     attempts: list[Attempt] = field(default_factory=list)
     config_versions: dict[str, int] = field(default_factory=dict)
@@ -280,7 +282,15 @@ def _resolved(
     result.query_text = resolution.query_text
     result.notes = resolution.notes
     result.missing = resolution.missing
-    result.questions = questions(resolution.missing, understood, city.name, resolution.date_choices)
+    result.questions = questions(
+        resolution.missing,
+        understood,
+        city.name,
+        resolution.date_choices,
+        resolution.budget,
+        resolution.filters.party_size,
+    )
+    result.budget = resolution.budget
     result.used_location = resolution.used_location
     result.location_source = resolution.location_source
     result.vibe, result.who = vibe, who

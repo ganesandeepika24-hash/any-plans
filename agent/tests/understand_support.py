@@ -21,6 +21,7 @@ MIGRATION_014 = REPO / "db" / "migrations" / "014_llm_understand_v2.sql"
 MIGRATION_016 = REPO / "db" / "migrations" / "016_search_and_usage.sql"
 MIGRATION_018 = REPO / "db" / "migrations" / "018_refine.sql"
 MIGRATION_020 = REPO / "db" / "migrations" / "020_date_ranges.sql"
+MIGRATION_026 = REPO / "db" / "migrations" / "026_party_size.sql"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _QUOTED = r"'((?:[^']|'')*)'"
@@ -100,16 +101,17 @@ def london() -> City:
 
 def migration_config() -> dict[str, Any]:
     """The active config the migrations ship: llm_understand v2 from 014,
-    provider_limits v1 from 016, refine_steps v1 from 018, and understand_prompt v6,
-    refine_prompt v3 and date_ranges v1 from 020."""
+    provider_limits v1 from 016, refine_steps v1 from 018, date_ranges v1 from 020, and
+    understand_prompt v7 and refine_prompt v4 from 026."""
     llm = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_014.read_text(), re.S).group(1)
     limits = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_016.read_text(), re.S).group(1)
     steps = re.search(
         r"values \('refine_steps', 1, '(.*?)'", MIGRATION_018.read_text(), re.S
     ).group(1)
-    m020 = MIGRATION_020.read_text()
-    prompt, refine_prompt = re.findall(r"\$prompt\$(.*?)\$prompt\$", m020, re.S)
-    ranges = re.search(r"\$json\$(.*?)\$json\$", m020, re.S).group(1)
+    ranges = re.search(r"\$json\$(.*?)\$json\$", MIGRATION_020.read_text(), re.S).group(1)
+    prompt, refine_prompt = re.findall(
+        r"\$prompt\$(.*?)\$prompt\$", MIGRATION_026.read_text(), re.S
+    )
     return {
         "llm_understand": json.loads(llm),
         "understand_prompt": {"system": prompt},
@@ -137,6 +139,7 @@ def reply(**fields: Any) -> str:
         "price_min": None,
         "price_max": None,
         "price_scope": None,
+        "party_size": None,
         "free": False,
         "near_me": False,
         "event": None,

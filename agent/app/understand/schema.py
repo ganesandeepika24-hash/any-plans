@@ -123,6 +123,9 @@ class UnderstoodQuery(_Strict):
     price_min: float | None = Field(ge=0)
     price_max: float | None = Field(ge=0)
     price_scope: Literal["each", "total"] | None  # "£60 each", "£60 total"
+    # "five of us": how many are going (prompt v7, decision 0024). Code divides a total by
+    # it. It defaults to null, so replies from earlier prompts still validate.
+    party_size: int | None = Field(default=None, ge=1, le=1000)
     free: bool
     near_me: bool  # "near me", "around here": needs the user's location
     event: str | None = Field(max_length=100)  # a named event whose date the user didn't give
@@ -160,8 +163,8 @@ class RefineReply(UnderstoodQuery):
 
 
 class SearchFilters(BaseModel):
-    """search_items' filters, key for key (migrations 010 and 024; a test compares
-    them)."""
+    """search_items' filters, key for key (migrations 010, 024 and 026; a test
+    compares them)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -175,6 +178,10 @@ class SearchFilters(BaseModel):
     lon: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float | None = Field(default=None, gt=0, le=100)
     limit: int | None = Field(default=None, ge=1, le=100)
+    # How many are going (decision 0024). Carried so the filter panel and the URL keep it;
+    # search_items checks it but doesn't filter on it (migration 026). price_min and
+    # price_max are always per ticket.
+    party_size: int | None = Field(default=None, ge=1, le=1000)
     # The days inside date_from to date_to that count ("the next 4 Saturdays", decision
     # 0020). search_items keeps only events on during one of them (migration 024), and
     # takes 2 to 31.

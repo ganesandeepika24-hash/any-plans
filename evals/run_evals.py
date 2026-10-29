@@ -5,7 +5,7 @@ Usage, from agent/ (so the agent's environment and packages are used):
     uv run python ../evals/run_evals.py [--config supabase|repo] [--out PATH]
 
 Each case runs with "now" frozen at its `now` (27 Oct 2026 12:00 London) and its
-`location`, if any. Rows with a `prior` (refine rows 25 and 26) run the Refine step on
+`location`, if any. Rows with a `prior` (refine rows 25, 26, 78 and 79) run the Refine step on
 that earlier search's stored filters instead (decision 0018). Rows tagged with a `skip`
 reason don't run; none are, now. The run stops starting cases before it could pass
 MAX_CALLS provider calls, so it never spends more than that.
@@ -20,7 +20,7 @@ radius only when the user stated one, and vibe and who on the rows that test the
   `also_accept` variant), field by field. This isolates the model from the resolver.
 
 A field also checks its clarify reasons: date (date, event_date), area (location),
-budget (budget, price_basis) and category (category).
+budget (budget, price_basis, party_size) and category (category).
 
 A case where no provider answered (resting) is a provider failure, not a parse failure:
 it's listed with its attempts but left out of both accuracies. Groq calls are paced to
@@ -94,7 +94,7 @@ FIELDS = ("date", "area", "budget", "category", "radius", "vibe", "who")
 REASONS = {
     "date": {"date", "event_date"},
     "area": {"location"},
-    "budget": {"budget", "price_basis"},
+    "budget": {"budget", "price_basis", "party_size"},
     "category": {"category"},
     "radius": set(),
     "vibe": set(),
@@ -149,9 +149,12 @@ def score_end_to_end(case: dict, result: UnderstandResult, city: City) -> dict[s
                 out[name] = ok and _area_matches(exp["area"], result, case, city)
             case "budget":
                 b = exp["budget"]
-                out[name] = _reasons(missing, "budget") == _reasons(exp["missing"], "budget") and (
-                    (f.price_min, f.price_max, f.include_unpriced)
+                # party_size is scored only on the rows that give it (decision 0024).
+                out[name] = (
+                    _reasons(missing, "budget") == _reasons(exp["missing"], "budget")
+                    and (f.price_min, f.price_max, f.include_unpriced)
                     == (b["price_min"], b["price_max"], b["include_unpriced"])
+                    and ("party_size" not in b or f.party_size == b["party_size"])
                 )
             case "category":
                 out[name] = _reasons(missing, "category") == _reasons(
@@ -273,9 +276,19 @@ def _change(q: UnderstoodQuery, kind: str) -> str | None:
 
 
 def _budget(q: UnderstoodQuery):
+    """The parts of a budget that change the search (decision 0024). With no party size,
+    only a total differs (it asks how many); for one person, each and total are the same;
+    for two or more, each, total and not saying all differ."""
     if q.free:
         return ("free",)
-    return (q.price_min, q.price_max, q.price_scope == "total", "budget" in q.unclear)
+    size = q.party_size
+    if size is None:
+        basis = q.price_scope == "total"
+    elif size == 1:
+        basis = None
+    else:
+        basis = q.price_scope
+    return (q.price_min, q.price_max, size, basis, "budget" in q.unclear)
 
 
 def _km(q: UnderstoodQuery) -> float | None:
@@ -624,11 +637,12 @@ async def main_async(args) -> int:
     cases = load_cases(args.cases)
     async with httpx.AsyncClient() as http:
         if args.config == "repo":
-            # What ships: llm_understand v2 from 014, understand_prompt v6, refine_prompt
-            # v3 and date_ranges v1 from 020, the seeded areas and calendar.
+            # What ships: llm_understand v2 from 014, date_ranges v1 from 020,
+            # understand_prompt v7 and refine_prompt v4 from 026, the seeded areas and
+            # calendar.
             from tests.understand_support import FakeStore, entries
 
-            versions = {"llm_understand": 2, "understand_prompt": 6, "refine_prompt": 3}
+            versions = {"llm_understand": 2, "understand_prompt": 7, "refine_prompt": 4}
             store = FakeStore(entries(versions=versions))
         else:
             if not (_env("SUPABASE_URL") and _env("SUPABASE_SERVICE_KEY")):

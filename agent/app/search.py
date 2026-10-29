@@ -212,7 +212,13 @@ class Searcher:
             raise PriorNotFound(prior_id)
         if row["status"] != "ok" or row["filters"] is None:
             raise PriorNotRefinable(row["status"])
-        prior = Prior(row["filters"], row["embedding_text"], row.get("vibe"), row.get("who"))
+        prior = Prior(
+            row["filters"],
+            row["embedding_text"],
+            row.get("vibe"),
+            row.get("who"),
+            row.get("budget"),
+        )
         parsed = await self._parser.refine(user_id, prior_id, prior, message, location)
         return await self._searched(parsed)
 

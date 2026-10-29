@@ -1,23 +1,26 @@
-"""The question for each clarify reason (decisions 0012, 0013, 0015 and 0020).
+"""The question for each clarify reason (decisions 0012, 0013, 0015, 0020 and 0024).
 
 One question per missing reason, in the order resolve() lists them, each naming what the
 person asked for. Choices are what the app offers as taps; an empty list means a typed
 answer. Groups split the choices by the field a tap fills (the category question offers
 categories and vibes); a group with no field holds the choices that fill none. The app
 shows them instead of running a search.
+
+The two budget questions (decision 0024) are one plain sentence each, with taps that read
+naturally when appended to the search ("…about a hundred quid. All 5 of us").
 """
 
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from app.understand.resolve import Missing
+from app.understand.resolve import Budget, Missing, pounds
 from app.understand.schema import UnderstoodQuery, Vibe
 
 LOCATION_CHOICES = ("Use my location", "Pick an area", "Drop a pin on the map")
 CATEGORY_GROUP = ("Music", "Comedy", "Food & Drink", "Arts", "Nightlife", "Family", "Sport")
 VIBE_GROUP = get_args(Vibe)
 SURPRISE_ME = ("Just surprise me",)
-PRICE_BASIS_CHOICES = ("Per person", "In total")
+PARTY_SIZE_CHOICES = ("2 people", "3 people", "4 people", "5 people", "6 people")
 
 
 @dataclass(frozen=True)
@@ -47,8 +50,15 @@ def questions(
     understood: UnderstoodQuery,
     city_name: str,
     date_choices: tuple[str, ...] = (),
+    budget: Budget | None = None,
+    party_size: int | None = None,
 ) -> tuple[Question, ...]:
+    """`budget` and `party_size` are what the search resolved with: a refine's come from
+    the earlier search as well as the follow-up."""
     subject = _subject(understood)
+    if budget is None:
+        budget = Budget(understood.price_min, understood.price_max, understood.price_scope)
+    amount = pounds(next((a for a in (budget.price_max, budget.price_min) if a is not None), 0))
     out = []
     for reason in missing:
         match reason:
@@ -69,13 +79,18 @@ def questions(
             case "budget":
                 out.append(Question(reason, f"{subject}: what's your budget per ticket?"))
             case "price_basis":
-                amount = understood.price_max or understood.price_min
+                # Asked for two or more (resolve); "all of you" if the number isn't known.
+                party = f"all {party_size}" if party_size else "all"
                 out.append(
                     Question(
                         reason,
-                        f"{subject}: is £{amount:g} per person or in total?",
-                        PRICE_BASIS_CHOICES,
+                        f"Is {amount} for each person, or for {party} of you?",
+                        ("Each person", f"{party.capitalize()} of us"),
                     )
+                )
+            case "party_size":
+                out.append(
+                    Question(reason, f"How many people is the {amount} for?", PARTY_SIZE_CHOICES)
                 )
             case "event_date":
                 out.append(
