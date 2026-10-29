@@ -62,10 +62,10 @@ export class AgentError extends Error {
   }
 }
 
-// A failed request is not necessarily a resting agent: auth, validation and
-// earlier-query errors must remain distinct. Daily caps arrive as ai_resting.
+// Resting comes only from the search reply itself (status ai_resting, which
+// includes reason daily_cap). Failed or unreachable requests are errors, not rest.
 export function isAiResting(value: unknown): boolean {
-  if (value instanceof AgentError) return value.status === null;
+  if (value instanceof AgentError) return false;
   if (typeof value !== "object" || value === null || !("status" in value)) return false;
   return value.status === "ai_resting" || value.status === "resting";
 }

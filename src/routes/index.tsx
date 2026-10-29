@@ -117,10 +117,8 @@ function Index() {
       if (e instanceof AgentError && e.status === 401) {
         setNotice("Please sign in again to use AI search.");
         setAuthOpen(true);
-      } else if (isAiResting(e)) {
-        setAiResting(true);
-        setSuccessfulQueryId(null);
-        if (!searched) showFilters({});
+      } else if (e instanceof AgentError && e.status === null) {
+        setNotice("AI search couldn't reach the search service. Try again, or use Filters.");
       } else {
         setNotice("AI search could not complete this request. Try again, or use Filters.");
       }
