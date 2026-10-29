@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import type { SearchFilters } from "./filters";
 
 export const AGENT_URL = (
-  (import.meta.env.VITE_AGENT_URL as string | undefined) ?? "https://any-plans.onrender.com"
+  (import.meta.env["VITE_AGENT_URL"] as string | undefined) ?? "https://any-plans.onrender.com"
 ).replace(/\/$/, "");
 
 export type Location = { lat: number; lon: number; source: "device" | "pin" };

@@ -59,8 +59,8 @@ export function FilterPanel({
     if (hideUnpriced) f.include_unpriced = false;
     const km = Math.round(miles * KM_PER_MILE * 1000) / 1000;
     const hasPoint = value.lat !== undefined && value.lon !== undefined;
-    f.lat = hasPoint ? value.lat : DEFAULT_AREA.lat;
-    f.lon = hasPoint ? value.lon : DEFAULT_AREA.lon;
+    f.lat = hasPoint ? value.lat! : DEFAULT_AREA.lat;
+    f.lon = hasPoint ? value.lon! : DEFAULT_AREA.lon;
     f.radius_km = Math.min(100, Math.max(0.1, km));
     onApply(f);
   }
@@ -118,7 +118,7 @@ export function FilterPanel({
       </div>
       <div>
         <Label>Within {miles.toFixed(1)} miles</Label>
-        <Slider className="mt-3" min={0.5} max={62} step={0.5} value={[miles]} onValueChange={([m]) => setMiles(m)} />
+        <Slider className="mt-3" min={0.5} max={62} step={0.5} value={[miles]} onValueChange={([m]) => m !== undefined && setMiles(m)} />
       </div>
       <Button className="w-full" onClick={apply}>
         Show events

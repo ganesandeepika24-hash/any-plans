@@ -28,7 +28,8 @@ export type SearchFilters = {
 };
 
 /** Raw URL params: every value is a string or a list of strings. */
-export type UrlParams = Record<string, string | string[] | undefined>;
+export type UrlKey = "q" | "date_from" | "date_to" | "cat" | "price_min" | "price_max" | "unpriced" | "lat" | "lon" | "radius_km" | "w" | "near";
+export type UrlParams = { [K in UrlKey]?: string | string[] | undefined };
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 const many = (v: string | string[] | undefined) => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
@@ -98,7 +99,7 @@ export function withDefaultArea(f: SearchFilters): { filters: SearchFilters; def
 }
 
 export function hasAnyFilter(p: UrlParams): boolean {
-  return ["date_from", "date_to", "cat", "price_min", "price_max", "unpriced", "lat", "radius_km", "w", "near"].some(
+  return (["date_from", "date_to", "cat", "price_min", "price_max", "unpriced", "lat", "radius_km", "w", "near"] as const).some(
     (k) => p[k] !== undefined,
   );
 }
@@ -118,8 +119,8 @@ export function stringifyParams(p: Record<string, unknown>): string {
   return parts.length ? `?${parts.join("&")}` : "";
 }
 
-export function parseParams(search: string): UrlParams {
-  const out: UrlParams = {};
+export function parseParams(search: string): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
   const s = search.startsWith("?") ? search.slice(1) : search;
   if (!s) return out;
   for (const part of s.split("&")) {
