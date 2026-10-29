@@ -283,8 +283,39 @@ def test_occurrences_that_share_a_name_never_overlap():
         assert all(a.last < b.first for a, b in pairwise(ds)), name
 
 
+@pytest.mark.parametrize(
+    ("event", "fields", "expected"),
+    [
+        ("Halloween", {}, ("2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00")),
+        ("Hallowe'en", {}, ("2026-10-31T05:00:00+00:00", "2026-11-01T05:00:00+00:00")),
+        (
+            "Bonfire Night",
+            {"when": when("weekday", "thu", qualifier="this")},  # "this Thursday" (row 32)
+            ("2026-11-05T05:00:00+00:00", "2026-11-06T05:00:00+00:00"),
+        ),
+        ("Guy Fawkes Night", {}, ("2026-11-05T05:00:00+00:00", "2026-11-06T05:00:00+00:00")),
+        ("Christmas Day", {}, ("2026-12-25T05:00:00+00:00", "2026-12-26T05:00:00+00:00")),
+        ("Boxing Day", {}, ("2026-12-26T05:00:00+00:00", "2026-12-27T05:00:00+00:00")),
+        ("New Year's Eve", {}, ("2026-12-31T05:00:00+00:00", "2027-01-01T05:00:00+00:00")),
+        ("Burns Night", {}, ("2027-01-25T05:00:00+00:00", "2027-01-26T05:00:00+00:00")),
+        ("St George's Day", {}, ("2027-04-23T05:00:00+01:00", "2027-04-24T05:00:00+01:00")),
+    ],
+)
+def test_fixed_date_days_named_as_events_take_their_date_from_the_calendar(event, fields, expected):
+    # The model often names these as events (the second baseline's rows 31, 32, 41 and
+    # 65), so the calendar holds them since 29 Oct 2026 (decision 0019 update).
+    assert event_window(event, **fields) == (expected, (), [])
+
+
+@pytest.mark.parametrize("event", ["Christmas", "Xmas", "Christmas markets"])
+def test_christmas_on_its_own_isnt_christmas_day(event):
+    # No bare "Christmas" alias: "at Christmas" means the season, not 25 December, so it
+    # still asks for a date, as before these rows.
+    assert event_window(event) == (None, ("event_date",), [])
+
+
 def test_calendar_seed_parsing_matches_the_database_shape():
-    assert len(CITY.calendar) == 12
+    assert len(CITY.calendar) == 19
     assert all(d.first <= d.last for d in CITY.calendar)
     assert [d.id for d in CITY.calendar if d.estimate] == ["london-2027-eid-al-fitr"]
 

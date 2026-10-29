@@ -78,3 +78,31 @@ The festival dates come from `claude/festival-dates-2026-2027` (checked 27 Oct 2
 - **Deliberate breaks:** 10. Nine were caught at once. One passed and got a test: a weekday search that counted the days of an event already under way.
 - **Ceiling with a perfect model:** end to end 53/73 (72.6%), up from 49/73. Rows 47, 48, 49 and 57 now pass. Rows 34, 42, 46, 52, 53 and 55 pass on date and still fail on area (step 5).
 - **Eval:** not run (Groq's daily limit, owner's hold). The rerun is step 6.
+
+## Update 2026-10-29: fixed-date days named as events
+
+- **Why:** this record left fixed-date days out of the calendar, because the model was meant to give them as dates. The second baseline (`docs/baseline.md`, run 40802911863) showed the model often names them as **events** instead. For example, "Bonfire Night this Thursday" came back as event Bonfire Night with a weekday, and "Boxing Day walk" as event Boxing Day with no date. With no calendar row, those asked for the event's date.
+- **What changed:** seven rows in `db/seed/calendar.sql`, each with its source and `checked_on` 2026-10-29:
+
+  | Day | Date | Source |
+  |---|---|---|
+  | Halloween | 31 Oct 2026 | the eve of All Saints' Day, 1 Nov (Church of England calendar) |
+  | Bonfire Night | 5 Nov 2026 | UK Parliament |
+  | Christmas Day | 25 Dec 2026 | gov.uk bank holidays |
+  | Boxing Day | 26 Dec 2026 | gov.uk; the bank holiday is the substitute day, Mon 28 Dec |
+  | New Year's Eve | 31 Dec 2026 | the day before New Year's Day (gov.uk) |
+  | Burns Night | 25 Jan 2027 | Scotland.org |
+  | St George's Day | 23 Apr 2027 | Church of England calendar; English Heritage |
+
+- **Not changed:**
+  - Pride and Notting Hill Carnival stay out (owner).
+  - **Mother's Day 2027 stays 7 March.** It's the fourth Sunday of Lent (Church of England calendar), three weeks before Easter Sunday, 28 March 2027 (from gov.uk's Good Friday, 26 March). 14 March was asked for, but it's the fifth Sunday of Lent.
+  - There's no bare "Christmas" alias: "at Christmas" means the season, and still asks for a date.
+- **The limit:** a reply that also flags the date as unclear still asks, whatever the calendar holds. So rows 31, 41 and 65 may still ask.
+- **Tests:**
+  - 723 agent tests pass, 12 of them new: each new day resolves when named as an event (aliases included), and "Christmas", "Xmas" and "Christmas markets" don't resolve to the day. The seed-parsing count is now 19.
+  - The seeds load twice, and `rls_and_indexes.sql` passes with 19 rows. 516 jobs tests pass.
+- **Deliberate breaks:** 2, caught after one test fix:
+  - Boxing Day moved to the 28th
+  - a bare "Christmas" alias, which needed the test changed from "Christmas markets" to a bare "Christmas" to be caught
+- **Refresh:** these rows need the next year added before they pass, with the rest of the calendar (before 1 September 2027).
