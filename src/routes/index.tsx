@@ -8,7 +8,7 @@ import { ClarifyStep } from "@/components/ClarifyStep";
 import { FilterPanel } from "@/components/FilterPanel";
 import { ResultCardView } from "@/components/ResultCardView";
 import { useAuth } from "@/hooks/useAuth";
-import { AgentError, submitAi, filterSearch, type ResultCard, type SearchResponse } from "@/lib/api";
+import { AgentError, isAiResting, submitAi, filterSearch, type ResultCard, type SearchResponse } from "@/lib/api";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
 import {
   filtersFromUrl,
@@ -80,7 +80,7 @@ function Index() {
         showFilters(r.filters, refineId ? originalQuery : query, r.location_source !== null);
         setAiResults(r.results); // null means the search step failed: filter search runs instead
         if (!r.results && r.message) setNotice(r.message);
-      } else if (r.status === "ai_resting") {
+      } else if (isAiResting(r)) {
         setAiResting(true);
         setSuccessfulQueryId(null);
         setAiResults(null);
@@ -92,10 +92,12 @@ function Index() {
       if (e instanceof AgentError && e.status === 401) {
         setNotice("Please sign in again to use AI search.");
         setAuthOpen(true);
-      } else {
+      } else if (isAiResting(e)) {
         setAiResting(true);
         setSuccessfulQueryId(null);
         if (!searched) showFilters({});
+      } else {
+        setNotice("AI search could not complete this request. Try again, or use Filters.");
       }
     } finally {
       setBusy(false);

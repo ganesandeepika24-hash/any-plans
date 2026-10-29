@@ -39,7 +39,7 @@ export type ResultCard = {
 };
 
 export type SearchResponse = {
-  status: "ok" | "needs_clarification" | "ai_resting";
+  status: "ok" | "needs_clarification" | "ai_resting" | "resting";
   reason: "providers" | "daily_cap" | "unavailable" | null;
   message: string | null;
   query_id: string;
@@ -60,6 +60,14 @@ export class AgentError extends Error {
   ) {
     super(message);
   }
+}
+
+// A failed request is not necessarily a resting agent: auth, validation and
+// earlier-query errors must remain distinct. Daily caps arrive as ai_resting.
+export function isAiResting(value: unknown): boolean {
+  if (value instanceof AgentError) return value.status === null;
+  if (typeof value !== "object" || value === null || !("status" in value)) return false;
+  return value.status === "ai_resting" || value.status === "resting";
 }
 
 async function token(refresh = false): Promise<string | null> {
