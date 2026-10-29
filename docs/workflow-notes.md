@@ -2,6 +2,12 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-29: fixed-date days in the calendar (0019 update)
+
+- **A requested date was wrong, and wasn't entered.** Mother's Day UK was asked for as 14 March 2027. The seed already had 7 March: the fourth Sunday of Lent, three weeks before Easter (28 March, from gov.uk's Good Friday). The Church of England's calendar confirms the rule. The row stays as it is, and the PR says why.
+- **A test that guarded nothing.** "Christmas markets isn't Christmas Day" passed even with a "Christmas" alias, because matching is on the whole name. The deliberate break showed it. The test now checks a bare "Christmas", which is what that alias would have changed.
+- **Two tests pinned the calendar at 12 rows,** `rls_and_indexes.sql` and the agent's seed-parsing test. Both are 19 now.
+
 ## 2026-10-29: Ticketmaster compliance, PR A (0001 and 0007 updates)
 
 - **The secret scan failed on Lovable's commits, not this PR's.** Gitleaks' generic rule flagged the Supabase publishable key (`sb_publishable_…`) in Lovable's generated `src/integrations/supabase/client.ts` and its committed `.env`. I checked the values' prefixes without printing them: both are publishable, which CLAUDE.md allows in the front end, so nothing needed rotating. `.gitleaks.toml` now allows that one key format, and every default rule stays on. `jobs/tests/test_secret_scan.py` fails if the exception widens, for example to `sb_secret_`. Gitleaks couldn't be run locally (the download was blocked), so CI's scan is the check. The first push then failed on my own test: a fake JWT literal matched gitleaks' `jwt` rule. Rewriting that commit was refused (a force-push), so the test now builds its fake values at run time, and `.gitleaksignore` holds that one finding by fingerprint, pinned by a test.

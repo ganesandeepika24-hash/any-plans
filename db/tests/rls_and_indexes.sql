@@ -821,9 +821,9 @@ begin
      or has_table_privilege('authenticated', 'public.calendar_dates', 'select') then
     raise exception 'calendar_dates should be readable by service_role only';
   end if;
-  if (select count(*) from public.calendar_dates where city_id = 'london') <> 12
+  if (select count(*) from public.calendar_dates where city_id = 'london') <> 19
      or exists (select 1 from public.calendar_dates where source = '' or checked_on > current_date) then
-    raise exception 'the calendar seed should load 12 London rows, each with a source and a past check date';
+    raise exception 'the calendar seed should load 19 London rows, each with a source and a past check date';
   end if;
   if (select count(*) from public.calendar_dates where estimate) <> 1 then
     raise exception 'only Eid al-Fitr is an estimate in the seed';
