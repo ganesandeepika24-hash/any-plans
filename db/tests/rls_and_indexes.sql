@@ -1013,6 +1013,64 @@ begin
   reset role;
 end $$;
 
+-- Migration 025: takedowns, its trigger, and the retention and schedule config.
+do $$
+declare
+  fn constant regprocedure := 'public.skip_taken_down_events()'::regprocedure;
+begin
+  if not (select relrowsecurity from pg_class where oid = 'public.takedowns'::regclass) then
+    raise exception 'takedowns must have RLS on';
+  end if;
+  if has_table_privilege('anon', 'public.takedowns', 'select')
+     or has_table_privilege('authenticated', 'public.takedowns', 'select')
+     or has_table_privilege('anon', 'public.takedowns', 'insert')
+     or has_table_privilege('authenticated', 'public.takedowns', 'delete') then
+    raise exception 'anon or authenticated can use takedowns';
+  end if;
+  if not has_table_privilege('service_role', 'public.takedowns', 'insert') then
+    raise exception 'service_role cannot record takedowns';
+  end if;
+
+  if not exists (select 1 from pg_trigger
+                  where tgrelid = 'public.events'::regclass
+                    and tgname = 'events_skip_taken_down' and tgenabled = 'O'
+                    and tgfoid = fn) then
+    raise exception 'events has no enabled events_skip_taken_down trigger';
+  end if;
+  if (select proconfig from pg_proc where oid = fn) is distinct from array['search_path=""'] then
+    raise exception 'skip_taken_down_events must set search_path to empty';
+  end if;
+  if exists (select 1 from pg_proc, aclexplode(proacl) a
+              where oid = fn and a.grantee = 0 and a.privilege_type = 'EXECUTE')
+     or has_function_privilege('anon', fn, 'execute') then
+    raise exception 'public or anon can execute skip_taken_down_events';
+  end if;
+
+  if (select value_json from public.config where key = 'event_retention' and is_active)
+     is distinct from '{"default_days_after_end": 0, "sources": {"ticketmaster": 0}}'::jsonb then
+    raise exception 'event_retention version 1 is missing, inactive or not 0 days';
+  end if;
+  if (select value_json from public.config where key = 'ingest_schedule' and is_active)
+     is distinct from '{"skiddle": true, "ticketmaster": false}'::jsonb then
+    raise exception 'ingest_schedule version 1 is missing, inactive or allows Ticketmaster';
+  end if;
+end $$;
+
+-- The trigger skips a taken-down event's insert, inside this test's transaction.
+do $$
+declare
+  n integer;
+begin
+  insert into public.takedowns (source, source_id, reference, requested_at)
+  values ('ticketmaster', 'rls-check', 'db check', now());
+  insert into public.events (city_id, source, source_id, title, category, start_at)
+  values ('london', 'ticketmaster', 'rls-check', 'blocked', 'Music', now() + interval '1 day');
+  select count(*) into n from public.events where source_id = 'rls-check';
+  if n <> 0 then
+    raise exception 'a taken-down event was inserted';
+  end if;
+end $$;
+
 rollback;
 
 \echo 'rls_and_indexes: all checks passed'

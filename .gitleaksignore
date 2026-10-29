@@ -1,0 +1,4 @@
+# One finding, ignored by fingerprint (commit:file:rule:line): a fake JWT that
+# jobs/tests/test_secret_scan.py held as a literal in this one commit. It was never a
+# real token. The test now builds its fake values at run time, so nothing new can match.
+bf6b5685b7acd5727fc0d9e94bb65c360aa0647a:jobs/tests/test_secret_scan.py:jwt:44

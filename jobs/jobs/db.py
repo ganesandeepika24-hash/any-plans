@@ -7,6 +7,7 @@ even if a code path tries to.
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -68,6 +69,14 @@ class Database:
         if row is None:
             raise LookupError(f"no city {city_id!r}")
         return City(row[0], ZoneInfo(row[1]), row[2], row[3])
+
+    def config_value(self, key: str) -> Any | None:
+        """The active config value for `key`, or None if there is none."""
+        with self.conn.cursor() as cur:
+            cur.execute("select value_json from public.config where key = %s and is_active", (key,))
+            row = cur.fetchone()
+        self.conn.rollback()
+        return None if row is None else row[0]
 
     def calls_today(self, service: str, today: date) -> int:
         with self.conn.cursor() as cur:
@@ -232,7 +241,9 @@ class Database:
                     "description": event.description,
                 },
             )
-            return bool(cur.fetchone()[0])
+            row = cur.fetchone()
+            # No row: the events_skip_taken_down trigger (025) skipped a taken-down event.
+            return False if row is None else bool(row[0])
 
     def delete_events(self, source: str, source_ids: list[str]) -> int:
         if not source_ids:
@@ -259,25 +270,44 @@ class Database:
             )
             return cur.rowcount
 
-    def delete_ended_events(self, now: datetime, fallback: timedelta) -> tuple[int, int]:
-        """Delete ended events. Returns (events, snapshots): the snapshots go by cascade.
+    def delete_ended_events(
+        self,
+        default_cutoff: datetime,
+        fallback: timedelta,
+        cutoffs: dict[str, datetime] | None = None,
+    ) -> tuple[int, int]:
+        """Delete events that ended at or before their source's cutoff (`cutoffs`), or
+        `default_cutoff` for a source not listed. Returns (events, snapshots): the
+        snapshots go by cascade.
 
         Every part of the statement reads the same snapshot of the data, so the count
         still sees the price_snapshots rows the cascade removes.
         """
+        cutoffs = cutoffs or {}
         with self.conn.cursor() as cur:
             cur.execute(
                 """
                 with gone as (
-                  delete from public.events
-                   where coalesce(end_at, start_at + %(fallback)s) <= %(now)s
-                  returning id
+                  delete from public.events e
+                   where coalesce(e.end_at, e.start_at + %(fallback)s)
+                         <= coalesce((select c.cutoff
+                                        from unnest(%(sources)s::text[],
+                                                    %(cutoffs)s::timestamptz[])
+                                             as c(source, cutoff)
+                                       where c.source = e.source),
+                                     %(default)s)
+                  returning e.id
                 )
                 select (select count(*) from gone),
                        (select count(*) from public.price_snapshots
                          where event_id in (select id from gone))
                 """,
-                {"fallback": fallback, "now": now},
+                {
+                    "fallback": fallback,
+                    "default": default_cutoff,
+                    "sources": list(cutoffs),
+                    "cutoffs": list(cutoffs.values()),
+                },
             )
             events, snapshots = cur.fetchone()
             return events, snapshots
@@ -293,6 +323,74 @@ class Database:
                 (source,),
             )
             return cur.rowcount
+
+    # Takedowns (0001, migration 025) ------------------------------------------
+
+    def takedown_recorded(self, source: str, source_id: str) -> datetime | None:
+        """When this event was taken down, or None."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "select removed_at from public.takedowns where source = %s and source_id = %s",
+                (source, source_id),
+            )
+            row = cur.fetchone()
+        return None if row is None else row[0]
+
+    def take_down(
+        self, source: str, source_id: str, reference: str, requested_at: datetime
+    ) -> dict[str, int]:
+        """Record the takedown and remove the event, by source and source ID together.
+        Its price snapshots go by cascade, other sources' copies that pointed at it
+        through duplicate_of are shown again, and its venue goes if it has no events
+        left. The caller commits. Returns the counts."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "insert into public.takedowns (source, source_id, reference, requested_at)"
+                " values (%s, %s, %s, %s)",
+                (source, source_id, reference, requested_at),
+            )
+            cur.execute(
+                """
+                select e.id, e.venue_id,
+                       (select count(*) from public.price_snapshots p where p.event_id = e.id),
+                       (select count(*) from public.events d where d.duplicate_of = e.id)
+                  from public.events e
+                 where e.source = %s and e.source_id = %s
+                """,
+                (source, source_id),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return {"events": 0, "snapshots": 0, "duplicates_shown": 0, "venues": 0}
+            event_id, venue_id, snapshots, duplicates = row
+            # duplicate_of is "on delete set null" (007): the copies are shown again.
+            cur.execute("delete from public.events where id = %s", (event_id,))
+            events = cur.rowcount
+            venues = 0
+            if venue_id is not None:
+                cur.execute(
+                    """
+                    delete from public.venues v
+                     where v.id = %s and v.source = %s
+                       and not exists (select 1 from public.events e where e.venue_id = v.id)
+                    """,
+                    (venue_id, source),
+                )
+                venues = cur.rowcount
+        return {
+            "events": events,
+            "snapshots": snapshots,
+            "duplicates_shown": duplicates,
+            "venues": venues,
+        }
+
+    def event_exists(self, source: str, source_id: str) -> bool:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "select 1 from public.events where source = %s and source_id = %s",
+                (source, source_id),
+            )
+            return cur.fetchone() is not None
 
     # Price snapshots (decision 0009) -----------------------------------------
     # "Current" is the same rule as events_public_read and the delete job; "priced"

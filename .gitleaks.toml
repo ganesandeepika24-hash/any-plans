@@ -1,0 +1,15 @@
+# Gitleaks config for the secret scan (.github/workflows/secret-scan.yml), which finds it
+# at the repo root. Every default rule stays on.
+#
+# One exception: Supabase publishable keys (sb_publishable_...). CLAUDE.md allows the
+# publishable key in the front end, and Lovable commits it in src/ and .env. The generic
+# rule can't tell it from a secret. Secret keys (sb_secret_...) and everything else still
+# fail the scan. jobs/tests/test_secret_scan.py keeps this exception that narrow.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Supabase publishable keys: public by design (CLAUDE.md, Secrets)"
+regexTarget = "secret"
+regexes = ['''^sb_publishable_[A-Za-z0-9_-]{16,}$''']
