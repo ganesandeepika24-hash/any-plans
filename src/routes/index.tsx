@@ -144,8 +144,8 @@ function Index() {
           Find something to do in London
         </h1>
         <p className="mt-4 text-lg text-muted-foreground">One search, every plan in the city</p>
-        <form className="mt-8" onSubmit={submit}>
-          <label className="flex items-center gap-3 rounded-full border border-border bg-card px-5 py-3 shadow-soft focus-within:ring-2 focus-within:ring-ring">
+        <form className="mt-8 flex flex-wrap items-center gap-3" onSubmit={submit}>
+          <label className="flex min-w-0 flex-[1_1_24rem] items-center gap-3 rounded-full border border-border bg-card px-5 py-3 shadow-soft focus-within:ring-2 focus-within:ring-ring">
             <Search className="h-5 w-5 shrink-0 text-muted-foreground" />
             <input
               type="search"
@@ -162,7 +162,7 @@ function Index() {
               </Button>
             </div>
           </label>
-          {aiResting && <p id="ai-resting" role="status" className="mt-2 text-right text-sm text-muted-foreground">AI search is resting. Filters still work.</p>}
+          {aiResting && <p id="ai-resting" role="status" className="ml-auto max-w-44 text-left text-sm text-muted-foreground">AI search is resting. Filters still work.</p>}
         </form>
         {!supabaseConfigured && (
           <p className="mt-4 text-sm text-destructive">Search isn't connected yet: the database settings are missing.</p>
