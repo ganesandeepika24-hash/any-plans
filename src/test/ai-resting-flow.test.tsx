@@ -38,7 +38,7 @@ describe("Signed-in resting notice flow (simulated session)", () => {
     mocks.submitAi.mockResolvedValue({ status: "ok", query_id: "latest-query", filters: {}, results: [], notes: [], location_source: null });
     renderPage();
     await search();
-    expect(mocks.submitAi).toHaveBeenCalledWith("Jazz in Soho tonight", undefined);
+    expect(mocks.submitAi).toHaveBeenCalledWith("Jazz in Soho tonight", undefined, null);
     expect(document.getElementById("ai-resting")).toBeNull();
     expect(screen.getByRole("textbox", { name: "Follow-up" })).toBeInTheDocument();
   });
