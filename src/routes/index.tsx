@@ -145,7 +145,7 @@ function Index() {
     runAi(q);
   }
 
-  async function useMyLocation() {
+  async function pickMyLocation() {
     setLocating(true);
     const loc = await readDevicePosition({ explicit: true });
     setLocating(false);
@@ -234,7 +234,7 @@ function Index() {
         />
         <div className="space-y-4">
           {notice && <p className="rounded-lg bg-muted px-4 py-3 text-sm text-foreground">{notice}</p>}
-          {clarifying && reply && <ClarifyStep questions={reply.questions} onAnswer={answer} onUseLocation={useMyLocation} locationDenied={geoDenied} busy={busy || locating} />}
+          {clarifying && reply && <ClarifyStep questions={reply.questions} onAnswer={answer} onUseLocation={pickMyLocation} locationDenied={geoDenied} busy={busy || locating} />}
           {!clarifying && notes.map((n) => <p key={n} className="text-sm text-muted-foreground">{n}</p>)}
           {!clarifying && filterQ.isFetching && aiResults === null && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Finding events…</p>
