@@ -569,13 +569,41 @@ There's no answer endpoint. The app sends a new `/search` (or `/parse`) with the
 
 ### Near me and the device location
 
-The near-me decision says "near me" uses the device location, read once with permission, and asks where only when that's unavailable. The agent can't read the browser's location, so the app does this:
+The near-me decision (`claude/near-me-decision-1.6.md`, decision 0017): "near me" uses the device location, read once with permission. A location question appears only when that's unavailable, and a vague request near the user still asks for a category.
 
-1. Send the query without `location`.
-2. If the reply's `missing` contains `location` and the user hasn't refused permission, ask the browser for the position. If permission is granted, send the query again with `source: "device"` and don't show the location question.
-3. If permission is refused or unavailable, show the location question. Its "Use my location" chip is then hidden or shows that permission is off; "Pick an area" and "Drop a pin on the map" still work.
+The agent can't read the browser's location, so the app reads it **before** the first call, and a near-me search costs one AI search:
 
-This costs two AI searches for a near-me request (one for each call). The permission-refused path needs a manual test before stage 2 (decision 0017).
+1. **Spot near me.** Before an AI search, check the text, ignoring case, for the [near-me phrases](#near-me-phrases) as whole words.
+2. **If one is found, get the position first:**
+   - Check `navigator.permissions.query({ name: "geolocation" })` where it's supported.
+   - **`granted` or `prompt`:** call `navigator.geolocation.getCurrentPosition` with `{ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }`. `prompt` shows the browser's own permission dialog.
+   - **On success:** send the search once with `"location": {"lat": …, "lon": …, "source": "device"}`.
+   - **`denied`, an error or the timeout:** send the search without `location`. Don't retry the position, and don't ask again in this session.
+3. **No phrase:** send the search without `location`.
+4. **The reply:**
+   - `location_source: "device"` means the person's own point was searched. Show "Near you", and keep the coordinates out of the URL ([section 12](#the-users-location)).
+   - If `missing` still has `location` (permission refused, or a phrase the list doesn't have), show the location question as usual. "Use my location" then reads the position and sends the search again with `source: "device"`. That second call is a second AI search. Hide "Use my location", or show it as off, when permission is `denied`.
+   - Other questions, such as a category for "something near me tonight", work as usual.
+5. **Refine:** when the last reply's `location_source` was `"device"`, send the same position again with `/refine` (section 6).
+
+**The field is `location.source`.** `location_source` is only in the response. A top-level `location_source` in a request is refused with 422.
+
+**What the agent does with it:**
+- With a device location, "near me" doesn't ask where, and the search is centred on that point.
+- A named place still wins ("near me in Soho" searches Soho), and the position is then not used.
+- If the app reads the position for a phrase the model doesn't treat as near me, the point is still searched, unless the text names a place.
+
+The permission-refused path still needs a manual test before stage 2 (decision 0017).
+
+#### Near-me phrases
+
+The phrases the agent's prompt reads as near me (`understand_prompt` v6). The app's list must be exactly these. A test (`agent/tests/test_near_me_phrases.py`) fails when the active prompt and this list differ, so a prompt change updates this list too, and then the app's.
+
+- `near me`
+- `nearby`
+- `nearby me`
+- `around me`
+- `around here`
 
 ## 9. Notes
 

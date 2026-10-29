@@ -2,6 +2,12 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-29: near me in one AI search (0017 update)
+
+- **The API doc's first near-me flow cost two AI searches.** I wrote it in PR #27: send, see `location` missing, read the position, send again. Each call counts against the cap of 10, so near me cost double. I flagged the cost when handing over #27, but left it in the contract; the owner chose to fix it. The app now reads the position first.
+- **A naming trap, checked rather than assumed.** The owner's note said "send … with location_source: device". The request field is `location.source`, and a top-level `location_source` is refused with 422. Checked against `ParseRequest` before writing the Lovable prompt, which now says so, and a test pins it.
+- **A copied list needs a guard.** The app's phrase list copies the prompt's. A drift test reads the active prompt from the migrations, and fails when the doc's list differs from it.
+
 ## 2026-10-28: step 1.4 fix 5, windows in search_items (0020 update)
 
 - **The fix as written wouldn't have been enough.** "The agent's response must return them in full" was already true. The real gap was that the filter panel's function refused `windows` (fix 4), so a URL carrying them couldn't be searched again. I raised it once in the plan, and the owner chose to move windows into `search_items`.
