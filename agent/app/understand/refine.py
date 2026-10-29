@@ -15,10 +15,15 @@ used it, the follow-up must send the location again, or it asks where.
 
 The default-area note follows the refined search, not the follow-up alone: "make it
 cheaper" on a Soho search shows no "Showing central London.", and on a search of the
-default area it still does (step 1.4 fix 3).
+default area it still does (step 1.4 fix 3). So does the per-ticket cap note.
+
+Party size (decision 0024): the earlier search's stated budget is stored beside its
+filters. "It's 6 of us now" divides a total again, and leaves a per-person cap alone; a
+budget that never said which asks, as a search would. "Cheaper" and "pricier" change the
+per-ticket cap, which is then the stated budget, per person.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -30,6 +35,7 @@ from app.understand.resolve import (
     MAX_RADIUS_KM,
     MISSING_ORDER,
     NO_RANGES,
+    Budget,
     City,
     DateRanges,
     Missing,
@@ -37,7 +43,9 @@ from app.understand.resolve import (
     Point,
     Resolution,
     default_area_note,
+    price_fields,
     resolve,
+    ticket_cap_note,
 )
 from app.understand.schema import RefineReply, SearchFilters, UnderstoodQuery
 
@@ -63,6 +71,7 @@ class Prior:
     embedding_text: str | None
     vibe: str | None = None
     who: str | None = None
+    budget: dict[str, Any] | None = None  # the stated Budget, as queries.budget stores it
 
     @property
     def used_location(self) -> bool:
@@ -96,7 +105,12 @@ def apply(
     f = dict(prior.filters)
     # The follow-up alone always reads as the default area; whether the refined search is
     # the default is decided at the end.
-    notes: list[Note] = [n for n in fresh.notes if n.code != "default_area"]
+    # The price notes are worked out again below, with the earlier party size and budget.
+    notes: list[Note] = [
+        n
+        for n in fresh.notes
+        if n.code not in ("default_area", "ticket_cap", "price_range_inverted")
+    ]
     missing: set[Missing] = set()
     used_location, source = False, None
 
@@ -119,14 +133,24 @@ def apply(
         else:
             missing.add("location")
 
-    if (
-        reply.price_min is not None
-        or reply.price_max is not None
-        or reply.free
-        or "budget" in reply.unclear
-    ):
+    budget = Budget.from_json(prior.budget)
+    if reply.party_size is not None:
+        f["party_size"] = reply.party_size
+    restated = reply.price_min is not None or reply.price_max is not None
+    if reply.free or ("budget" in reply.unclear and not restated):
         _take(f, new, _PRICE_KEYS)
-        missing |= {m for m in fresh.missing if m in ("budget", "price_basis")}
+        missing |= {m for m in fresh.missing if m == "budget"}
+        budget = None
+    elif restated or reply.price_scope is not None or reply.party_size is not None:
+        if restated:
+            budget = Budget(reply.price_min, reply.price_max, reply.price_scope)
+        elif budget is not None and reply.price_scope is not None:
+            budget = replace(budget, basis=reply.price_scope)  # "that's per head"
+        if budget is not None:
+            # A budget given before 026 has no stored budget: its per-ticket cap is kept.
+            for key in _PRICE_KEYS:
+                f.pop(key, None)
+            price_fields(budget, f.get("party_size"), f, notes, missing)
 
     if reply.distance is not None:
         d = reply.distance
@@ -143,7 +167,10 @@ def apply(
                 f["lat"], f["lon"] = location.lat, location.lon
                 used_location, source = True, location.source
 
+    cap = f.get("price_max")
     _change_price(f, reply, steps, notes, missing)
+    if f.get("price_max") != cap:
+        budget = Budget(f.get("price_min"), f["price_max"], "each")
     used_location, source = _change_distance(
         f, reply, steps, notes, missing, location, used_location, source
     )
@@ -155,6 +182,8 @@ def apply(
 
     if _is_default_area(f, city) and not used_location:
         notes.append(default_area_note(city))
+    if (note := ticket_cap_note(f)) is not None:
+        notes.append(note)
 
     resolution = Resolution(
         SearchFilters(**f),
@@ -164,6 +193,7 @@ def apply(
         used_location,
         source,
         fresh.date_choices if "date" in missing else (),
+        budget,
     )
     return Refinement(resolution, reply.vibe or prior.vibe, reply.who or prior.who)
 

@@ -14,11 +14,17 @@ city's calendar (decision 0019). When the search can't run without asking (a vag
 conflicting date, no location for "near me", "cheap", a total price, an event the
 calendar doesn't have, no idea what kind of thing), the filter is left out and the
 reason goes in `missing`. The rest still resolves, so the answer only fills the gap.
+
+Prices are per ticket (decision 0024). A total is divided by the party size, rounded
+down to the penny so the group stays inside it. A total with no party size asks how
+many; a budget that doesn't say which, for two or more, asks whether it's each or for
+everyone. Anything else needs no question, since the answer wouldn't change the search.
 """
 
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from decimal import ROUND_FLOOR, Decimal
 from typing import Literal, Self
 from zoneinfo import ZoneInfo
 
@@ -48,14 +54,18 @@ NoteCode = Literal[
     "estimated_date",  # the calendar's date for the event is an estimate (decision 0019)
     "count_capped",  # more recurring days than date_ranges allows (decision 0020)
     "default_area",  # the default area, central London, was searched (step 1.4 fix 3)
+    "ticket_cap",  # the per-ticket cap for a party of two or more (decision 0024)
 ]
 # The complete list, in the order the app asks.
-Missing = Literal["location", "date", "budget", "price_basis", "event_date", "category"]
+Missing = Literal[
+    "location", "date", "budget", "price_basis", "party_size", "event_date", "category"
+]
 MISSING_ORDER: tuple[Missing, ...] = (
     "location",
     "date",
     "budget",
     "price_basis",
+    "party_size",
     "event_date",
     "category",
 )
@@ -179,6 +189,24 @@ class City:
         return min(found, key=lambda d: d.first, default=None)
 
 
+PriceBasis = Literal["each", "total"]
+
+
+@dataclass(frozen=True)
+class Budget:
+    """A budget as the user stated it (decision 0024): the amounts, and whether they're
+    per person or for everyone (None when they didn't say). Stored with the query, so a
+    refine that changes the party size can divide a total again."""
+
+    price_min: float | None
+    price_max: float | None
+    basis: PriceBasis | None
+
+    @classmethod
+    def from_json(cls, data: dict | None) -> Self | None:
+        return cls(**data) if data else None
+
+
 @dataclass(frozen=True)
 class Note:
     code: NoteCode
@@ -194,6 +222,7 @@ class Resolution:
     used_location: bool = False  # lat and lon are the user's own point: never stored
     location_source: LocationSource | None = None  # that point's source, when used
     date_choices: tuple[str, ...] = ()  # the date question's taps, for a recurring day
+    budget: Budget | None = None  # the stated budget, before any division
 
 
 def normalise(name: str) -> str:
@@ -262,7 +291,9 @@ def resolve(
         missing.add("category")
 
     used_location = _resolve_place(understood, city, location, fields, notes, missing, event_area)
-    _resolve_price(understood, fields, notes, missing)
+    budget = _resolve_price(understood, fields, notes, missing)
+    if (note := ticket_cap_note(fields)) is not None:
+        notes.append(note)
 
     return Resolution(
         SearchFilters(**fields),
@@ -272,6 +303,7 @@ def resolve(
         used_location,
         location.source if used_location and location is not None else None,
         date_choices,
+        budget,
     )
 
 
@@ -591,18 +623,37 @@ def default_area_note(city: City) -> Note:
     return Note("default_area", f"Showing central {city.name}.")
 
 
-def _resolve_price(understood: UnderstoodQuery, fields: dict, notes: list, missing: set) -> None:
+def _resolve_price(
+    understood: UnderstoodQuery, fields: dict, notes: list, missing: set
+) -> Budget | None:
+    if understood.party_size is not None:
+        fields["party_size"] = understood.party_size
     if understood.free:
         # Free means a known price of 0, so unpriced events don't count.
         fields["price_max"], fields["include_unpriced"] = 0.0, False
-        return
+        return None
     low, high = understood.price_min, understood.price_max
-    if "budget" in understood.unclear and low is None and high is None:
-        missing.add("budget")  # "cheap": ask rather than pick a number
+    if low is None and high is None:
+        if "budget" in understood.unclear:
+            missing.add("budget")  # "cheap": ask rather than pick a number
+        return None
+    budget = Budget(low, high, understood.price_scope)
+    price_fields(budget, understood.party_size, fields, notes, missing)
+    return budget
+
+
+def price_fields(
+    budget: Budget, party_size: int | None, fields: dict, notes: list, missing: set
+) -> None:
+    """Per-ticket price_min and price_max from a stated budget (decision 0024), or the
+    question whose answer would change them."""
+    if budget.basis == "total" and party_size is None:
+        missing.add("party_size")  # a total for how many?
         return
-    if understood.price_scope == "total" and (low is not None or high is not None):
-        missing.add("price_basis")  # a total for how many? Prices are per ticket.
+    if budget.basis is None and party_size is not None and party_size > 1:
+        missing.add("price_basis")  # £100 each, or for all five?
         return
+    low, high = budget.price_min, budget.price_max
     if low is not None and high is not None and low > high:
         notes.append(
             Note(
@@ -611,7 +662,29 @@ def _resolve_price(understood: UnderstoodQuery, fields: dict, notes: list, missi
             )
         )
         return
-    if low is not None:
-        fields["price_min"] = low
-    if high is not None:
-        fields["price_max"] = high
+    divide = budget.basis == "total" and party_size is not None and party_size > 1
+    for key, amount in (("price_min", low), ("price_max", high)):
+        if amount is not None:
+            fields[key] = per_ticket(amount, party_size) if divide else amount
+
+
+def per_ticket(total: float, party_size: int) -> float:
+    """A total split between `party_size`, rounded down to the penny: £60 for 7 is £8.57,
+    so seven tickets at the cap never cost more than £60."""
+    share = Decimal(str(total)) / party_size
+    return float(share.quantize(Decimal("0.01"), rounding=ROUND_FLOOR))
+
+
+def ticket_cap_note(fields: dict) -> Note | None:
+    """The per-ticket cap for a party of two or more ("Up to £20 each for 5 people
+    (tickets only)"). None with no cap, or a cap of zero: free needs no note."""
+    size, cap = fields.get("party_size"), fields.get("price_max")
+    if size is None or size < 2 or not cap:
+        return None
+    return Note("ticket_cap", f"Up to {pounds(cap)} each for {size} people (tickets only)")
+
+
+def pounds(amount: float) -> str:
+    """£20, £8.57, £8.50."""
+    text = f"{amount:.2f}"
+    return f"£{text.removesuffix('.00')}"

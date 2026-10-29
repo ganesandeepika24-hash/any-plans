@@ -32,8 +32,8 @@ _spec.loader.exec_module(run_evals)
 CASES = run_evals.load_cases()
 BY_ROW = {c["row"]: c for c in CASES}
 CITY = london()
-REASONS = {"location", "date", "budget", "price_basis", "event_date", "category"}
-VERSIONS = {"llm_understand": 2, "understand_prompt": 6, "refine_prompt": 3}  # what ships
+REASONS = {"location", "date", "budget", "price_basis", "party_size", "event_date", "category"}
+VERSIONS = {"llm_understand": 2, "understand_prompt": 7, "refine_prompt": 4}  # what ships
 RANGES = DateRanges.model_validate(migration_config()["date_ranges"])
 
 # What a perfect model still fails end to end today: resolver and calendar gaps, each
@@ -70,16 +70,19 @@ def answer(row, **changes) -> str:
 # The set ---------------------------------------------------------------------------
 
 
-def test_the_set_has_73_synthetic_rows_in_order():
-    assert [c["row"] for c in CASES] == list(range(1, 74))
-    assert len({c["id"] for c in CASES}) == 73
+def test_the_set_has_79_synthetic_rows_in_order():
+    # 79 is the most a run can reach: it stops before passing 80 calls, keeping room for
+    # a fallback. Add more rows only with a decision on the cap (0016).
+    assert [c["row"] for c in CASES] == list(range(1, 80))
+    assert len({c["id"] for c in CASES}) == 79
     assert {c["tag"] for c in CASES} == {"synthetic"}
     assert {c["now"] for c in CASES} == {"2026-10-27T12:00:00+00:00"}
 
 
 def test_no_rows_are_skipped_and_the_refine_rows_carry_their_earlier_search():
     assert [c["row"] for c in CASES if c["skip"]] == []
-    assert sorted(c["row"] for c in CASES if c.get("prior")) == [25, 26]  # decision 0018
+    # Decision 0018; 78 and 79 refine a party-size search (0024).
+    assert sorted(c["row"] for c in CASES if c.get("prior")) == [25, 26, 78, 79]
 
 
 def test_pin_rows_score_date_and_radius_only():
@@ -130,7 +133,8 @@ def test_expectations_are_well_formed():
         (39, ["location"]),  # round 2: "nearby" with no location; Saturday resolves
         (56, ["event_date"]),
         (57, ["event_date"]),
-        (60, ["price_basis"]),
+        (60, ["party_size"]),  # a total with no party size asks how many (0024)
+        (74, ["price_basis"]),  # five of us, about a hundred quid: each or for all five?
         (61, ["category"]),  # near-me decision: the device location, a vague request
         (63, ["category"]),  # the same with a dropped pin
         (62, ["location", "date"]),
@@ -153,7 +157,7 @@ def test_a_perfect_model_scores_100_percent_model_only():
     results, _ = run(CASES, perfect(CASES))
     summary = run_evals.summarise(results)
     assert summary["model_only"]["accuracy"] == 1.0
-    assert summary["ran"] == 73 and summary["skipped"] == 0
+    assert summary["ran"] == 79 and summary["skipped"] == 0
 
 
 def test_a_perfect_model_fails_end_to_end_only_on_known_resolver_gaps():
@@ -165,7 +169,7 @@ def test_a_perfect_model_fails_end_to_end_only_on_known_resolver_gaps():
     }
     assert failed == CEILING_FAILURES
     summary = run_evals.summarise(results)
-    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (72, 73)
+    assert (summary["end_to_end"]["cases_passed"], summary["end_to_end"]["of"]) == (78, 79)
 
 
 # Scoring catches mistakes ----------------------------------------------------------
@@ -185,6 +189,11 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         (71, {"unclear": []}, "category"),
         (27, {"unclear": []}, "budget"),
         (60, {"price_scope": "each"}, "budget"),
+        (74, {"price_scope": "total"}, "budget"),  # guessed a basis the user didn't give
+        (75, {"party_size": 4}, "budget"),
+        (76, {"party_size": 4}, "budget"),  # same £100 cap: only the party size is wrong
+        (77, {"party_size": 3}, "budget"),  # "me and 3 mates" is four
+        (79, {"party_size": None}, "budget"),  # "6 of us now" missed: still £20 for five
         (62, {"near_me": False}, "area"),
         (5, {"unclear": []}, "date"),
         (19, {"free": False, "price_max": 0}, "budget"),  # "under £0" isn't "free"
@@ -205,6 +214,11 @@ WHEN = {r: BY_ROW[r]["reply"]["when"] for r in (6, 31)}
         "no category question",
         "no budget question",
         "total as each",
+        "basis guessed",
+        "wrong party size",
+        "wrong party size, same cap",
+        "me and 3 mates miscounted",
+        "new party size missed",
         "no location question",
         "vague date not flagged",
         "zero price, not free",
@@ -270,7 +284,7 @@ def test_a_perfect_reply_passes_the_near_me_rows():
 
 def test_the_round_2_rows_score_vibe_and_who():
     rows = {c["row"] for c in CASES if {"vibe", "who"} & set(c["scored"])}
-    assert rows == {3, 4, 12, 13, 14, 22, 50}
+    assert rows == {3, 4, 12, 13, 14, 22, 50, 78}  # 78: "make it more chilled" (0024)
 
 
 def test_a_vibe_or_group_without_a_category_question_passes_but_asking_fails():
@@ -501,7 +515,7 @@ def test_the_run_stops_before_passing_the_cap():
     results, llm = run(CASES, perfect(CASES), max_calls=5)
     assert llm.calls == 5
     assert sum(r.scored for r in results) == 5
-    assert run_evals.summarise(results)["not_run"] == 73 - 5
+    assert run_evals.summarise(results)["not_run"] == 79 - 5
 
 
 def test_fallbacks_count_and_a_case_never_starts_without_room_for_them():
@@ -575,7 +589,7 @@ def test_a_real_run_paces_groq_and_reports_tokens(monkeypatch, tmp_path):
     assert (summary["rate_limit_retries"], summary["stopped"]) == (0, None)
     assert summary["config_versions"] == {
         "llm_understand": 2,
-        "understand_prompt": 6,
+        "understand_prompt": 7,
         "date_ranges": 1,
     }
 
@@ -597,8 +611,8 @@ def test_max_calls_above_80_is_refused():
 def test_the_report_gives_both_numbers_and_the_failures():
     results, _ = run(CASES, perfect(CASES))
     text = run_evals.report(run_evals.summarise(results), results)
-    assert "end to end: 98.6% (72/73 cases)" in text
-    assert "model only: 100.0% (73/73 cases)" in text
+    assert "end to end: 98.7% (78/79 cases)" in text
+    assert "model only: 100.0% (79/79 cases)" in text
     assert "r23 'Friday night within a mile of Old Street (pin at Old Street)': date | -" in text
 
 
@@ -626,7 +640,7 @@ def test_scores_go_to_langfuse_with_versions_and_failed_fields():
     e2e = bodies[("r23", "parse_end_to_end")]
     assert (e2e["value"], e2e["comment"]) == (0, "failed: date")
     assert e2e["traceId"] == results[1].trace_id
-    assert e2e["metadata"]["understand_prompt_version"] == 6
+    assert e2e["metadata"]["understand_prompt_version"] == 7
     assert e2e["metadata"]["llm_understand_version"] == 2
     assert bodies[("r64", "parse_model_only")]["value"] == 1
 

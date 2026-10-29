@@ -118,7 +118,7 @@ async def test_get_own_reads_only_the_users_own_row():
     (request,) = seen
     assert request.url.path == "/rest/v1/queries"
     assert dict(request.url.params) == {
-        "select": "id,status,filters,embedding_text,vibe,who",
+        "select": "id,status,filters,embedding_text,vibe,who,budget",
         "id": f"eq.{QUERY}",
         "user_id": f"eq.{USER}",
     }

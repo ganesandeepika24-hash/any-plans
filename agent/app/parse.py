@@ -270,6 +270,7 @@ class Parser:
             filters=stored_filters(result),
             vibe=vibe,
             who=who,
+            budget=asdict(result.budget) if result.budget else None,
             embedding_text=result.query_text,
             notes=[n.model_dump() for n in notes],
             missing=missing,
@@ -337,6 +338,7 @@ class Parser:
         filters: dict[str, Any] | None = None,
         vibe: str | None = None,
         who: str | None = None,
+        budget: dict[str, Any] | None = None,
         embedding_text: str | None = None,
         notes: list[dict[str, str]] | None = None,
         missing: list[str] | None = None,
@@ -344,8 +346,8 @@ class Parser:
         trace_id: str | None = None,
         refines: UUID | None = None,
     ) -> dict[str, Any]:
-        """A queries row (migration 002, plus missing from 013, vibe and who from 015 and
-        refines from 018; columns proposed in 0013)."""
+        """A queries row (migration 002, plus missing from 013, vibe and who from 015,
+        refines from 018 and budget from 026; columns proposed in 0013)."""
         return {
             "id": str(query_id),
             "user_id": str(user_id),
@@ -358,6 +360,7 @@ class Parser:
             "filters": filters,
             "vibe": vibe,
             "who": who,
+            "budget": budget,  # the stated budget, for a later refine (0024)
             "embedding_text": embedding_text,
             "notes": notes or [],
             "missing": missing or [],

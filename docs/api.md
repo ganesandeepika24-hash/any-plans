@@ -81,7 +81,7 @@ All three POST routes answer with the same fields (`ParseResponse`). `/search` a
 | `location_source` | `"device"`, `"pin"` or null | Set only when the filters' `lat` and `lon` are the user's own point from the request. Null when a named area or the default area was used (decision 0017). |
 | `embedding_text` | string or null | The words used for similarity ranking. Internal. |
 | `notes` | array of `{code, message}` | Things the user should know about how the search was read. See [Notes](#9-notes). |
-| `missing` | array of strings | Set when `status` is `needs_clarification`: `location`, `date`, `budget`, `price_basis`, `event_date`, `category`, always in that order. |
+| `missing` | array of strings | Set when `status` is `needs_clarification`: `location`, `date`, `budget`, `price_basis`, `party_size`, `event_date`, `category`, always in that order. |
 | `questions` | array of `{reason, question, choices, groups}` | One per entry in `missing`, in the same order. See [Clarify](#8-clarify-questions-and-how-taps-go-back). |
 | `trace_id` | string or null | The Langfuse trace. Internal. |
 | `results` | array or null | `/search` and `/refine` only. See [Result cards](#10-result-cards). |
@@ -92,10 +92,11 @@ All three POST routes answer with the same fields (`ParseResponse`). `/search` a
 |---|---|---|
 | `date_from`, `date_to` | ISO 8601 with offset | Events whose span overlaps this window. |
 | `categories` | array of `Music`, `Comedy`, `Theatre`, `Sport`, `Nightlife`, `Arts`, `Family`, `Food & Drink` | Never empty when present. |
-| `price_min`, `price_max` | number (GBP) | Price per ticket. Events whose price range overlaps. |
+| `price_min`, `price_max` | number (GBP) | Price per ticket, always: a total has already been divided by the party size ([Party size](#party-size-and-the-ticket-cap)). Events whose price range overlaps. |
 | `include_unpriced` | boolean | `false` drops events with no price (set for "free"). |
 | `lat`, `lon`, `radius_km` | numbers | All three or none. `radius_km` is in km (0 to 100]. |
 | `limit` | integer | 1 to 100. Not set by the parser today: the search returns up to 20. |
+| `party_size` | integer | 1 to 1000: how many are going ("five of us"). Kept so the filter panel and the URL carry it. The search checks it but doesn't filter on it (decision 0024). |
 | `windows` | array of 2 to 31 `[from, to]` pairs | Only these days count inside `date_from` to `date_to` ("the next 4 Saturdays", decision 0020). In order, not overlapping, inside the dates. Always sent in full: at most 8 for a recurring day, 5 for a month of them. Carry every one in the URL ([section 12](#windows-in-the-url)). |
 
 ## 4. POST /parse
@@ -516,7 +517,16 @@ The earlier search was live music this weekend under £40; "cheaper" lowers the 
 }
 ```
 
-A refine can also answer `needs_clarification` or `ai_resting`, exactly as `/search` does.
+A refine can also answer `needs_clarification` or `ai_resting`, exactly as `/search` does. To answer a refine's question, send `/refine` again with the **same** earlier `query_id` and the follow-up plus the answer appended ("it's 6 of us now. Each person"). The earlier search is the one that finished; the refine that asked didn't.
+
+Follow-ups keep the party size and the budget as the user stated it (decision 0024):
+
+| Follow-up | What changes |
+|---|---|
+| "make it more chilled" | `vibe` only. The party size, budget and cap stay. Vibe isn't a filter yet (decision 0015), so the same events come back. |
+| "it's 6 of us now" | `party_size`. A total is divided again (£100 for 6 is £16.66 each); a per-person cap stays; a budget that never said which asks `price_basis`. |
+| "£150 between us" | The new total, divided by the earlier party size. |
+| "make it cheaper" | The per-ticket cap, as before. That cap is then per person, so a later party-size change keeps it. |
 
 ## 7. GET /health
 
@@ -549,12 +559,30 @@ A `needs_clarification` reply has one question per missing reason. Show them tog
 | `date` (recurring day) | "{Subject}: which dates?" | "Next 4 Saturdays", "This month", "Pick a month" (the day and count vary) |
 | `date` (other) | "{Subject}: which date do you mean?" | none: typed answer |
 | `budget` | "{Subject}: what's your budget per ticket?" | none: typed answer |
-| `price_basis` | "{Subject}: is £60 per person or in total?" | "Per person", "In total" |
+| `price_basis` | "Is £100 for each person, or for all 5 of you?" | "Each person", "All 5 of us" (the number varies) |
+| `party_size` | "How many people is the £100 for?" | "2 people", "3 people", "4 people", "5 people", "6 people" |
 | `event_date` | "I don't know the date for {event}. Can you give me a date?" | none: typed answer |
 | `category` | "{Subject}: what are you in the mood for?" | the three groups below |
 
 - **`choices`** is always the flat list. **`groups`** is set only on the category question, and says which field a tap fills: `category` (Music, Comedy, Food & Drink, Arts, Nightlife, Family, Sport), `vibe` (Chilled, Lively, Cultural, Foodie, Outdoors), and a group with `field: null` for "Just surprise me". Show the three groups as separate rows.
 - **An empty `choices`** means a text box, not chips. The user can always type their own answer instead of tapping.
+
+### Party size and the ticket cap
+
+The model reads the numbers; the agent does the sums (decision 0024). Prices on events are per ticket, so a total is divided by the party size and rounded down to the penny (£60 for 7 is £8.57). The agent asks only when the answer changes the search:
+
+| Budget | Party size | Result |
+|---|---|---|
+| Each ("£20 each", "a head", "per person") | any | £20 cap. No question. |
+| Total ("£100 total", "between us", "all in") | 1 | £100 cap. No question. |
+| Total | 2 or more | Divided: £100 for 5 is £20. No question. |
+| Doesn't say | none or 1 | Per ticket, as before. No question. |
+| Doesn't say ("five of us, about a hundred quid") | 2 or more | Asks `price_basis`. |
+| Total | none | Asks `party_size`. |
+
+Loose wording works: "about a hundred quid", "a ton", "under a tenner", "me and 3 mates" (4), "for two". Typed answers work like taps, since the whole text is read again: "it's per head", "all in", "there'll be six", "me plus 3". An answer that still doesn't say gets the same question again.
+
+When there's a cap and two or more people, `notes` has `ticket_cap`: "Up to £20 each for 5 people (tickets only)".
 
 ### How an answer goes back
 
@@ -597,7 +625,7 @@ The permission-refused path still needs a manual test before stage 2 (decision 0
 
 #### Near-me phrases
 
-The phrases the agent's prompt reads as near me (`understand_prompt` v6). The app's list must be exactly these. A test (`agent/tests/test_near_me_phrases.py`) fails when the active prompt and this list differ, so a prompt change updates this list too, and then the app's.
+The phrases the agent's prompt reads as near me (`understand_prompt` v7). The app's list must be exactly these. A test (`agent/tests/test_near_me_phrases.py`) fails when the active prompt and this list differ, so a prompt change updates this list too, and then the app's.
 
 - `near me`
 - `nearby`
@@ -618,6 +646,7 @@ The phrases the agent's prompt reads as near me (`understand_prompt` v6). The ap
 | `count_capped` | "Showing the next 8, the most." |
 | `radius_capped` | "Searching within 100 km, the furthest." |
 | `price_range_inverted` | "The lowest price was above the highest, so prices were ignored." |
+| `ticket_cap` | "Up to £20 each for 5 people (tickets only)". The per-ticket cap for two or more people (decision 0024). |
 | `already_free` | "These are already free." (refine) |
 | `no_price_limit` | "There was no price limit to raise." (refine) |
 | `radius_floor` | "Searching within 0.5 km, the closest." (refine; the number comes from config) |
@@ -803,7 +832,9 @@ That's `POST <SUPABASE_URL>/rest/v1/rpc/search_items_public` with the body `{"fi
 
 ### Request: `filters`
 
-The same `SearchFilters` keys as in [section 3](#3-shared-response-body), all optional: `date_from`, `date_to`, `categories`, `price_min`, `price_max`, `include_unpriced`, `lat`, `lon`, `radius_km`, `limit`.
+The same `SearchFilters` keys as in [section 3](#3-shared-response-body), all optional: `date_from`, `date_to`, `categories`, `price_min`, `price_max`, `include_unpriced`, `lat`, `lon`, `radius_km`, `limit`, `windows`, `party_size`.
+
+- **Party size (decision 0024):** the panel's budget field is **per ticket**: label it "per ticket". Its party size goes in `party_size` (an integer, 1 to 1000), and the URL carries it. The search doesn't filter on it, so it changes no results; it keeps an AI search's party size when its filters load into the panel. When the panel has a party size of 2 or more and a budget, show the same line the agent sends: "Up to £20 each for 5 people (tickets only)". The panel doesn't divide totals.
 
 - The filter panel builds this object from the URL, and an AI search's `filters` can be passed straight in, `windows` and all.
 - Times must carry an offset (`2026-10-30T17:00:00+00:00`, or `Z`).

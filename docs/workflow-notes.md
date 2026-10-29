@@ -2,6 +2,15 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-29: party size (decision 0024)
+
+- **Eleven eval rows would have outrun the call cap.** The first draft added 11 rows (84 in all). A run stops before 80 calls and keeps room for a fallback, so the last rows would never have run, silently. Caught when the perfect-model test reported 80 cases run, not 84. Kept six rows that need the real model's reading; the arithmetic cases are unit tests. A test now says why 79 is the ceiling.
+- **A test that would have failed for the wrong reason.** "Party size changes no rows" compared whole rows from two calls, and each call has its own `now()`, so the date score differs. It now leaves out `score` and `called_at`.
+- **A new migration that broke an old check.** 026 first appended `party_size` after `windows`, and 024's db check looks for `'windows']`. 026 now lists it before `windows`, so 024's check stands unedited.
+- **A scorer line no test reached.** A deliberate break removed the end-to-end party-size comparison and the suite still passed: every mistake row also changed the price. Row 76 with the wrong party size, and the same £100 cap, now fails only through that line.
+- **A question that could have read "all None of you".** The basis question is asked only for two or more, but `questions()` can be called without a number. It says "all of you" then, and a test pins that.
+- **013's check had no name.** Postgres named it `queries_missing_check1`, which isn't guaranteed to match on Supabase. 026 finds the check by its text, and fails unless there's exactly one.
+
 ## 2026-10-29: Skiddle nightly cancelled at 30 minutes (0009 change)
 
 - **One round trip per row.** The embedding job written for 0009 updated each event in its own statement. The tests ran against a local database, where a round trip costs nothing, so 5,000 of them looked free. Over the session pooler they took most of the run. Each batch is now one statement, and a test fails if a batch is written row by row.
