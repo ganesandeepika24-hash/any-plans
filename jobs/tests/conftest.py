@@ -136,6 +136,7 @@ def db(db_url):
             "venues",
             "job_runs",
             "usage_daily",
+            "takedowns",
         ):
             conn.execute(f"delete from public.{table}")  # noqa: S608 (fixed table names)
     database = Database.connect(db_url, read_only=False)

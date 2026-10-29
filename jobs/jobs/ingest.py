@@ -10,6 +10,7 @@ After the run, main() runs dedupe and then embed_events in the same mode.
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import Counter
@@ -23,7 +24,7 @@ import httpx
 import psycopg
 from pydantic import ValidationError
 
-from jobs import config, dedupe, embed_events
+from jobs import config, dedupe, embed_events, schedule_gate
 from jobs.db import Database, RunCounts
 from jobs.geo import haversine_km
 from jobs.http import CallBudget, RateLimitedClient
@@ -201,6 +202,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     db = Database.connect(settings.db_url, read_only=args.dry_run)
+    # Before any API call: a scheduled run only for a source 0001 allows (migration 025).
+    refused = schedule_gate.refusal(db, args.source, os.environ.get("GITHUB_EVENT_NAME"))
+    if refused:
+        db.close()
+        print(f"::error::{refused}", file=sys.stderr)
+        return 3
     now = datetime.now(UTC).replace(microsecond=0)
     try:
         with httpx.Client(timeout=30) as http:

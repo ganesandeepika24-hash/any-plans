@@ -170,10 +170,11 @@ def test_the_delete_job_reports_events_venues_and_snapshots(db, sql):
     assert sql("select count(*) from price_snapshots") == [(2,)]
 
 
-def test_the_delete_job_prints_three_counts(db, sql, capsys):
+def test_the_delete_job_prints_three_counts_and_the_retention_used(db, sql, capsys):
     ended = add_event(sql, "ended", NOW - 5 * HOUR, end_at=NOW - HOUR)
     add_snapshot(sql, ended, date(2026, 10, 31))
     delete_ended.run(db, NOW)
     assert capsys.readouterr().out.strip() == (
-        '{"events_deleted": 1, "venues_deleted": 0, "snapshots_deleted": 1}'
+        '{"events_deleted": 1, "venues_deleted": 0, "snapshots_deleted": 1,'
+        ' "retention_days": {"default": 0, "ticketmaster": 0}}'
     )

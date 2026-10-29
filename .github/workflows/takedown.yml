@@ -1,0 +1,71 @@
+name: Takedown
+# Manual only. Removes one event on its owner's request, within 24 hours (decision 0001;
+# runbook docs/runbooks/takedown.md). The job fixes the source, so this file
+# names none. Inputs reach the script through env, never pasted into it.
+# jobs/tests/test_workflow_guard.py fails CI if this gets any other trigger.
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_id:
+        description: The event's ID at the source (events.source_id)
+        type: string
+        required: true
+      reference:
+        description: The request's ticket or email subject (no personal details)
+        type: string
+        required: true
+      requested_at:
+        description: When the request arrived, ISO 8601 with offset (blank for now)
+        type: string
+        required: false
+        default: ""
+      block_only:
+        description: Record and block even if the event isn't stored (it has ended)
+        type: boolean
+        default: false
+      dry_run:
+        description: Check only. The database connection is read-only.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-writes
+  cancel-in-progress: false
+
+jobs:
+  takedown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: jobs
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: jobs/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Take down
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          EVENT_ID: ${{ inputs.event_id }}
+          REFERENCE: ${{ inputs.reference }}
+          REQUESTED_AT: ${{ inputs.requested_at }}
+          BLOCK_ONLY: ${{ inputs.block_only }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(--source-id "$EVENT_ID" --reference "$REFERENCE")
+          if [ -n "$REQUESTED_AT" ]; then args+=(--requested-at "$REQUESTED_AT"); fi
+          if [ "$BLOCK_ONLY" = "true" ]; then args+=(--block-only); fi
+          if [ "$DRY_RUN" != "false" ]; then args+=(--dry-run); fi
+          uv run python -m jobs.takedown "${args[@]}"

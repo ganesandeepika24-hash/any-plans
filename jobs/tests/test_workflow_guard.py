@@ -304,3 +304,83 @@ def test_guard_rejects_any_other_trigger(text):
 )
 def test_guard_accepts_manual_only(text):
     assert guard_failures(text) == []
+
+
+TAKEDOWN_WORKFLOW = WORKFLOWS / "takedown.yml"
+
+
+def test_takedown_workflow_is_manual_only_and_runs_only_the_takedown():
+    # Decision 0001's takedown path (migration 025, jobs.takedown): by hand, one event.
+    text = TAKEDOWN_WORKFLOW.read_text()
+    assert guard_failures(text) == []
+    doc = yaml.safe_load(text)
+    inputs = on_section(text)["workflow_dispatch"]["inputs"]
+    assert inputs["dry_run"]["default"] is True and inputs["block_only"]["default"] is False
+    assert doc["concurrency"]["group"] == "db-writes"
+    (job,) = doc["jobs"].values()
+    (step,) = [s for s in job["steps"] if "jobs.takedown" in s.get("run", "")]
+    assert "python -m jobs.takedown" in step["run"] and "jobs.ingest" not in text
+    # Inputs reach the script through env only, so an input can't inject shell.
+    assert "${{" not in step["run"]
+
+
+def takedown_args(inputs: dict[str, str], bin_dir) -> list[str]:
+    """Run the takedown step's script as GitHub would, with a stub `uv`, and return the
+    job's arguments."""
+    doc = yaml.safe_load(TAKEDOWN_WORKFLOW.read_text())
+    (job,) = doc["jobs"].values()
+    (step,) = [s for s in job["steps"] if "jobs.takedown" in s.get("run", "")]
+
+    def render(value) -> str:
+        def expression(match: re.Match) -> str:
+            name = match.group(1)
+            if name.startswith("inputs."):
+                return inputs.get(name.removeprefix("inputs."), "")
+            return "unused"
+
+        return EXPRESSION.sub(expression, str(value))
+
+    uv = bin_dir / "uv"
+    uv.write_text(STUB_UV)
+    uv.chmod(0o755)
+    env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    env |= {k: render(v) for k, v in step["env"].items()}
+    bash = shutil.which("bash")
+    assert bash, "bash is needed to run the workflow step"
+    out = subprocess.run(  # noqa: S603 (our own committed workflow, not input)
+        [bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    job_args = ["run", "python", "-m", "jobs.takedown"]
+    assert out[: len(job_args)] == job_args
+    return out[len(job_args) :]
+
+
+ID_AND_REF = ["--source-id", "G5v123", "--reference", "TM-REQ 7; rm -rf /"]
+
+
+@pytest.mark.parametrize(
+    ("inputs", "expected"),
+    [
+        ({"dry_run": "true", "block_only": "false"}, [*ID_AND_REF, "--dry-run"]),
+        ({"dry_run": "false", "block_only": "false"}, ID_AND_REF),
+        ({"dry_run": "false", "block_only": "true"}, [*ID_AND_REF, "--block-only"]),
+        (
+            {
+                "dry_run": "false",
+                "block_only": "false",
+                "requested_at": "2026-10-29T09:00:00+00:00",
+            },
+            [*ID_AND_REF, "--requested-at", "2026-10-29T09:00:00+00:00"],
+        ),
+        ({}, [*ID_AND_REF, "--dry-run"]),  # anything but "false" is a dry run
+    ],
+    ids=["default", "for real", "block only", "requested at", "no inputs"],
+)
+def test_takedown_step_passes_inputs_as_single_arguments(tmp_path, inputs, expected):
+    # The reference stays one argument, shell characters and all.
+    inputs = {"event_id": "G5v123", "reference": "TM-REQ 7; rm -rf /"} | inputs
+    assert takedown_args(inputs, tmp_path) == expected

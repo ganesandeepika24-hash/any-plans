@@ -40,3 +40,15 @@ Later tables point at events. Migration 002 (`query_results`, `clicks`) and stag
 - **Deleted rows per night:** `job_runs.deleted` on the delete job's row (migration 005), covering events and orphaned Ticketmaster venues.
 - **Zero events older than their end time:** `select count(*) from events where coalesce(end_at, start_at + interval '3 hours') <= now() - interval '1 day'` should be 0. It allows one day for the next nightly run.
 - Results: none yet. The job is built in step 1.1.
+
+## Update 2026-10-29: the days after the end are config (migration 025)
+
+How long after its end an event is kept is now config `event_retention`, read by `jobs/delete_ended.py`: `default_days_after_end` and days per source, whole numbers from 0 to 7. Version 1 is 0 for every source, Ticketmaster included (the owner's choice (a)). This record's rule is unchanged.
+
+A missing or malformed config makes every source 0, so a bad read can only delete sooner, never keep longer. The job prints the days it used. Tests cover:
+- each source's days applying only to that source
+- the default for sources not listed
+- 11 malformed configs and no config
+- snapshots going with their event
+
+0001's update records the choice.

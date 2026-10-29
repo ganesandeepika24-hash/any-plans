@@ -66,3 +66,22 @@ Skiddle schedule: APPROVED (conditions recorded 26 Oct 2026)
 - [x] OSM copyright and attribution page. Read 27 Oct 2026, with the ODbL summary and the OSMF Collective Database Guideline. Conditions recorded in 0006 (ODbL section).
 - [x] Skiddle: API key requested 25 Oct 2026 as non-commercial portfolio use. Full project description emailed to dev@skiddle.com the same day. Website on the form is a GitHub profile (to be replaced at launch). Approved and key received 25 Oct 2026 (key saved in password manager as SKIDDLE_KEY; not in Lovable or the repo). Conditions from the approval email are quoted under "Skiddle conditions" (recorded 26 Oct 2026). Reminder: replace the GitHub profile website with the live URL at launch, and ask for written approval before any commercial use.
 - [ ] Sign-up card requirements recorded for each account.
+## Update 2026-10-29: Ticketmaster compliance, PR A (migration 025)
+
+Ticketmaster's written reply on a scheduled bulk fetch hasn't come. Until it does, the source stays **NOT CLEARED** and out of the nightly job. This update builds the conditions above that don't depend on that reply. The owner approved the plan on 29 Oct 2026, choosing (a) on both open questions.
+
+| Question | Options | Choice | Why |
+|---|---|---|---|
+| Takedown path | A SQL snippet in a doc; **a tested job and a manual workflow** | Job and workflow | Repeatable inside 24 hours, with a dry run, a `job_runs` row and tests. Runbook: `docs/runbooks/takedown.md`. |
+| Matching the event | `source_id` alone; **`source` and `source_id` together** | Both | Source IDs are only unique within a source. A test keeps a Skiddle row with the same ID string, and a deliberate break caught the single-key delete. |
+| Keeping it gone | Rely on nobody ingesting it again; filter in the ingest code; **a `takedowns` table and a trigger on `events`** | Trigger | The ingest code stays as it is: a taken-down event is skipped on insert or update, by any job. The one change is that `upsert_event` treats the skipped row as not new rather than failing. |
+| Retention for Ticketmaster | **(a) 0 days after the end, in config**; (b) 1 day after the end | (a) | "Delete after the end time, no archive" (this record and 0007). The 04:00 job deletes within a day of the end. Config `event_retention` holds the days per source (most 7), so changing them needs no code. A missing or malformed config uses 0, never longer. |
+| Scheduled runs | The workflow guard only; **the guard plus a check at run time** | Both | `ingest_schedule` (`{"skiddle": true, "ticketmaster": false}`) is checked in `jobs.ingest.main()` before any call. A scheduled run of a source that isn't true stops with exit 3, and so does every scheduled run if the config can't be read. A test keeps the config in step with this record's status lines. |
+
+**Still open:**
+- **Ticketmaster's reply** on bulk, non-user-initiated calls. If it clears the nightly job:
+  - change the Ticketmaster row's status
+  - add a version of `ingest_schedule` with `"ticketmaster": true`
+  - then give the workflow its schedule. The guard tests follow the status line.
+- **PR B, the on-demand fetch** behind `ticketmaster_live` (off by default, not built yet). Live results would go in a separate list (choice (a)), so the main results stay identical to signed-out search (PRD F-01).
+- **The takedown condition** above is now met by the job, not a stage 2 admin path.

@@ -2,6 +2,17 @@
 
 Things the AI got wrong or nearly got wrong, and what caught them. Newest first.
 
+## 2026-10-29: Ticketmaster compliance, PR A (0001 and 0007 updates)
+
+- **The retention ask would have kept data longer.** "Default 1 day after end" read as a new rule, but the cleanup job already deleted every source's ended events nightly (0007 rejected "keep for N days"). I raised it in the plan, and the owner kept 0 days, now in config.
+- **A guard would have failed on a doc path.** No workflow but Ticketmaster's own may mention Ticketmaster. The takedown workflow first linked a runbook named `ticketmaster-takedown.md`. The runbook is now `takedown.md`, and the workflow names no source.
+- **Three test expectations were mine, not the code's:**
+  - a re-ingest a day later moved the ingest's windows past the fixture's, so the sweep deleted everything
+  - the expected rows kept the Skiddle copy's old link
+  - the retention count was off by one event
+- **One deliberate break was missed at first.** With the ID check removed, a malformed ID still failed, as "no such event", so the test passed for the wrong reason. The test now expects the specific refusal for each bad input.
+- **The trigger needed one change in the shared write path.** A skipped insert returns no row, so `upsert_event` would have crashed a manual Ticketmaster ingest. It now returns "not new". Skiddle rows never match a takedown, so its nightly run is unchanged.
+
 ## 2026-10-29: near me in one AI search (0017 update)
 
 - **The API doc's first near-me flow cost two AI searches.** I wrote it in PR #27: send, see `location` missing, read the position, send again. Each call counts against the cap of 10, so near me cost double. I flagged the cost when handing over #27, but left it in the contract; the owner chose to fix it. The app now reads the position first.
