@@ -155,13 +155,13 @@ function Index() {
   }
 
   useEffect(() => {
-    if (reply?.missing.includes("location")) geoPermission().then((p) => setGeoDenied(p === "denied"));
+    if (reply?.missing?.includes("location")) geoPermission().then((p) => setGeoDenied(p === "denied"));
   }, [reply]);
 
   const results = aiResults ?? filterQ.data?.rows ?? null;
   const notes =
     aiResults && reply
-      ? [...(reply.location_source === "device" ? ["Near you"] : []), ...reply.notes.map((n) => n.message)]
+      ? [...(reply.location_source === "device" ? ["Near you"] : []), ...(reply.notes ?? []).map((n) => n.message)]
       : filterQ.data?.nearYou
         ? ["Near you"]
         : filterQ.data?.defaultArea
