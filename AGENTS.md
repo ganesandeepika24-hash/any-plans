@@ -10,3 +10,4 @@
 <!-- LOVABLE:END -->
 
 - Keep sign-in calls in a browser-safe helper and agent requests in the API module; explicit follow-ups use the latest successful query ID so new searches and refinements cannot be confused.
+- The device position lives only in memory in src/lib/geo.ts and the near-me phrase list lives in src/lib/api.ts; this keeps the position out of the URL and storage and keeps the list matched to docs/api.md section 8.
