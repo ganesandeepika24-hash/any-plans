@@ -123,8 +123,15 @@ export function aiRefine(query_id: string, message: string, location?: Location 
 }
 
 // Only the explicit follow-up field supplies a successful query ID.
-export function submitAi(query: string, successfulQueryId?: string | null) {
-  return successfulQueryId ? aiRefine(successfulQueryId, query) : aiSearch(query);
+export function submitAi(query: string, successfulQueryId?: string | null, location?: Location | null) {
+  return successfulQueryId ? aiRefine(successfulQueryId, query, location) : aiSearch(query, location);
+}
+
+// Must match docs/api.md section 8 "Near-me phrases" exactly. Don't add to it.
+export const NEAR_ME_PHRASES = ["near me", "nearby", "nearby me", "around me", "around here"] as const;
+
+export function hasNearMe(text: string): boolean {
+  return NEAR_ME_PHRASES.some((ph) => new RegExp(`\\b${ph.replace(/ /g, "\\s+")}\\b`, "i").test(text));
 }
 
 // Filter-only search (docs/api.md section 13). Not an agent call.

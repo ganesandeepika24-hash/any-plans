@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthDialog } from "@/components/AuthDialog";
@@ -8,7 +8,8 @@ import { ClarifyStep } from "@/components/ClarifyStep";
 import { FilterPanel } from "@/components/FilterPanel";
 import { ResultCardView } from "@/components/ResultCardView";
 import { useAuth } from "@/hooks/useAuth";
-import { AgentError, isAiResting, submitAi, filterSearch, type ResultCard, type SearchResponse } from "@/lib/api";
+import { AgentError, hasNearMe, isAiResting, submitAi, filterSearch, type Location, type ResultCard, type SearchResponse } from "@/lib/api";
+import { geoPermission, readDevicePosition, rememberedPosition } from "@/lib/geo";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
 import {
   filtersFromUrl,
@@ -49,15 +50,27 @@ function Index() {
   const [aiResting, setAiResting] = useState(false);
   const [followUp, setFollowUp] = useState("");
   const [successfulQueryId, setSuccessfulQueryId] = useState<string | null>(null);
+  const [lastSource, setLastSource] = useState<"device" | "pin" | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [geoDenied, setGeoDenied] = useState(false);
 
   const urlFilters = useMemo(() => filtersFromUrl(params), [params]);
   const searched = hasAnyFilter(params);
+  const nearMe = params.near === "me";
 
   const filterQ = useQuery({
     queryKey: ["filter-search", urlFilters],
     queryFn: async () => {
+      if (nearMe) {
+        // near=me: read the position again; it is never stored in the URL.
+        const pos = await readDevicePosition();
+        if (pos) {
+          const f = { ...urlFilters, lat: pos.lat, lon: pos.lon, radius_km: urlFilters.radius_km ?? Number(params.radius_km ?? 10) };
+          return { rows: await filterSearch(f), defaultArea: false, nearYou: true };
+        }
+      }
       const { filters, defaultArea } = withDefaultArea(urlFilters);
-      return { rows: await filterSearch(filters), defaultArea };
+      return { rows: await filterSearch(filters), defaultArea, nearYou: false };
     },
     enabled: supabaseConfigured && searched && aiResults === null,
   });
@@ -66,14 +79,24 @@ function Index() {
     navigate({ search: { ...(q ? { q } : {}), ...filtersToUrl(f, { personalPoint }) } });
   }
 
-  async function runAi(query: string, refineId?: string | null) {
+  async function runAi(query: string, refineId?: string | null, given?: Location | null) {
     if (!session) return setAuthOpen(true);
     setBusy(true);
     setNotice(null);
     setAiResting(false);
     try {
-      const r = await submitAi(query, refineId);
+      let location: Location | null = given ?? null;
+      if (!location && refineId) {
+        if (lastSource === "device") location = rememberedPosition();
+      } else if (!location && hasNearMe(query)) {
+        setLocating(true);
+        location = await readDevicePosition();
+        setLocating(false);
+        if (!location) setGeoDenied((await geoPermission()) === "denied");
+      }
+      const r = await submitAi(query, refineId, location);
       setReply(r);
+      setLastSource(r.location_source);
       if (r.status === "ok" && r.filters) {
         setSuccessfulQueryId(r.query_id);
         setFollowUp("");
@@ -100,6 +123,7 @@ function Index() {
         setNotice("AI search could not complete this request. Try again, or use Filters.");
       }
     } finally {
+      setLocating(false);
       setBusy(false);
     }
   }
@@ -121,15 +145,34 @@ function Index() {
     runAi(q);
   }
 
+  async function pickMyLocation() {
+    setLocating(true);
+    const loc = await readDevicePosition({ explicit: true });
+    setLocating(false);
+    if (loc) return runAi(originalQuery, null, loc);
+    setGeoDenied((await geoPermission()) === "denied");
+    setNotice("Couldn't read your location. Pick an area instead.");
+  }
+
+  useEffect(() => {
+    if (reply?.missing?.includes("location")) geoPermission().then((p) => setGeoDenied(p === "denied"));
+  }, [reply]);
+
   const results = aiResults ?? filterQ.data?.rows ?? null;
   const notes =
-    aiResults && reply ? reply.notes.map((n) => n.message) : filterQ.data?.defaultArea ? ["Showing central London."] : [];
+    aiResults && reply
+      ? [...(reply.location_source === "device" ? ["Near you"] : []), ...(reply.notes ?? []).map((n) => n.message)]
+      : filterQ.data?.nearYou
+        ? ["Near you"]
+        : filterQ.data?.defaultArea
+          ? [nearMe ? "Couldn't read your location. Showing central London." : "Showing central London."]
+          : [];
   const clarifying = reply?.status === "needs_clarification";
 
   return (
     <main className="min-h-screen bg-background px-4 pb-16">
       <header className="mx-auto flex max-w-6xl items-center justify-between py-4">
-        <button className="font-display text-2xl text-foreground" onClick={() => { setReply(null); setAiResults(null); setSuccessfulQueryId(null); setAiResting(false); navigate({ search: {} }); }}>
+        <button className="font-display text-2xl text-foreground" onClick={() => { setReply(null); setAiResults(null); setSuccessfulQueryId(null); setLastSource(null); setAiResting(false); navigate({ search: {} }); }}>
           Any Plans?
         </button>
         {ready && supabaseConfigured && (
@@ -164,6 +207,7 @@ function Index() {
               </Button>
             </div>
           </label>
+          {locating && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Finding your location…</p>}
           {aiResting && <p id="ai-resting" role="status" className="ml-auto max-w-44 text-left text-sm text-muted-foreground">AI search is resting. Filters still work.</p>}
         </form>
         {!supabaseConfigured && (
@@ -184,12 +228,13 @@ function Index() {
             setAiResults(null);
             setNotice(null);
             setSuccessfulQueryId(null);
-            showFilters(f, typeof params.q === "string" ? params.q : undefined);
+            const q = typeof params.q === "string" ? params.q : undefined;
+            navigate({ search: { ...(q ? { q } : {}), ...filtersToUrl(f, { personalPoint: nearMe }) } });
           }}
         />
         <div className="space-y-4">
           {notice && <p className="rounded-lg bg-muted px-4 py-3 text-sm text-foreground">{notice}</p>}
-          {clarifying && reply && <ClarifyStep questions={reply.questions} onAnswer={answer} busy={busy} />}
+          {clarifying && reply && <ClarifyStep questions={reply.questions} onAnswer={answer} onUseLocation={pickMyLocation} locationDenied={geoDenied} busy={busy || locating} />}
           {!clarifying && notes.map((n) => <p key={n} className="text-sm text-muted-foreground">{n}</p>)}
           {!clarifying && filterQ.isFetching && aiResults === null && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Finding events…</p>
